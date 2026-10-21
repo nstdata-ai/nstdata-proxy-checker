@@ -1,0 +1,40 @@
+{
+  "name": "@nstdata-ai/proxy-checker",
+  "version": "1.1.0",
+  "description": "Bounded HTTP/HTTPS proxy checks and reusable Node.js gateway transport",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    },
+    "./transport": {
+      "types": "./src/transport.d.ts",
+      "import": "./src/transport.js"
+    }
+  },
+  "bin": {
+    "nstdata-proxy-checker": "src/cli.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "README_zh.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md"
+  ],
+  "engines": {
+    "node": "^22.18.0 || ^24.0.0"
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check:package": "node scripts/check-package.mjs",
+    "typecheck": "tsc --noEmit --strict --module nodenext --target es2022 test/types.ts"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.0",
+    "typescript": "5.9.3"
+  }
+}
