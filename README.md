@@ -22,7 +22,7 @@ Set `NSTDATA_PROXY_URL` to the generated proxy URL in a protected environment, t
 npx --no-install nstdata-proxy-checker --target https://example.com/ --timeout 20000
 ```
 
-`--file` accepts a protected JSON array of 1–100 proxy URLs, at most 1 MiB, and overrides the environment proxy. Use owner-only file permissions. Invalid entries produce indexed `INVALID_CONFIG` rows; valid entries continue. Malformed documents or common options reject the invocation.
+`--file` accepts a protected JSON array of 1–100 proxy URLs, at most 1 MiB, and overrides the environment proxy. Use owner-only file permissions. Invalid entries produce indexed `INVALID_CONFIG` rows; valid entries continue. Malformed documents or invalid common option formats/ranges reject the invocation.
 
 Each entry sends one GET, including duplicate URLs. HTTPS targets use CONNECT. Requests may consume traffic; there is no redirect, retry, rotation or direct fallback. HTTP/HTTPS gateways and generated username/session syntax are supported; this tool does not manage channels or verify PM routing.
 
@@ -35,7 +35,7 @@ Each entry sends one GET, including duplicate URLs. HTTPS targets use CONNECT. R
 | `--expected-text` | Optional case-sensitive literal, up to 4096 UTF-8 bytes |
 | `NSTDATA_PROXY_CA_FILE` | Optional absolute PEM CA path; TLS verification remains enabled |
 
-Exit codes: 0 all rows pass; 1 at least one failed row; 2 invalid document/configuration; 130 interrupted. SIGINT/SIGTERM stops active and queued work. `probeRequested` means a local transport request was initiated, not proof that a request reached the target.
+Exit codes: 0 all rows pass; 1 at least one failed row; 2 invocation rejected for an invalid document or arguments; 130 interrupted. SIGINT/SIGTERM stops active and queued work. `probeRequested` means a local transport request was initiated, not proof that a request reached the target.
 
 ## Content checks and output
 
@@ -59,7 +59,7 @@ const one = await checkProxy(process.env.NSTDATA_PROXY_URL, {
 // checkProxies([url1, url2], {targetURL, concurrency:2, signal}) preserves order.
 ```
 
-`checkProxies` preserves order and accepts `invalidInput: 'reject'` (default) or `'report'`. Strict mode rejects invalid URLs before any request. Other options are `maxResponseBytes` (default 1 MiB, range 256–64 MiB), `caFile`, `signal` and `expectedText`. Common options are validated before dispatch. Use a signal to bound the whole batch; timeout is per probe.
+`checkProxies` preserves order and accepts `invalidInput: 'reject'` (default) or `'report'`. Strict mode rejects invalid URLs before any request. Other options are `maxResponseBytes` (default 1 MiB, range 256–64 MiB), `caFile`, `signal` and `expectedText`. Common option formats/ranges are validated before dispatch. CA file read or PEM trust-loading failures produce `INVALID_CONFIG` rows with `probeRequested: false` (CLI exit 1). Use a signal to bound the whole batch; timeout is per probe.
 
 Body size and assertion output are independently bounded; assertion mode retains a 16000-character serialized-response cap. A response-limit or output-limit failure is not a successful assertion. TLS/auth/CONNECT errors remain separate from target HTTP failures.
 
