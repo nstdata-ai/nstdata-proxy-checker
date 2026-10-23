@@ -11,5 +11,6 @@
 - Classify incomplete certificate-chain verification failures as TLS errors.
 - Measure duration through complete body decoding; report unknown values explicitly and omit credentials/response bodies from checker results.
 - Add explicit exit-IP echo probes and optional IP information lookup, with independent results and bounded cancellation.
+- Snapshot per-call options before traffic so later caller mutations cannot enable or redirect diagnostic stages.
 - Keep the IP lookup package optional; default checks do not contact its service or install it.
 - Include bilingual workflow guides and installed-package, TLS, CLI and documentation-example checks.

@@ -157,3 +157,28 @@ test('CLI exit probes work without the optional lookup package, including CSV', 
     assert.equal(missing.code, 2); assert.equal(JSON.parse(missing.stderr).error.code, 'IP_LOOKUP_NOT_INSTALLED');
     assert.equal(proxy.requests.length, 4);
 });
+
+test('in-flight option mutation cannot add or redirect diagnostic requests', async t => {
+    let received, release;
+    const proxy = await gateway(t, (req, res) => {
+        if (req.url === targetURL) { release = () => res.end('page'); received(); }
+        else res.end(echoIp);
+    });
+    for (const diagnostics of [false, true]) {
+        let calls = 0;
+        const options = { targetURL, ...(diagnostics ? { ipProbeURL, lookupIp: async ip => { calls++; return details(ip); } } : {}) };
+        const arrived = new Promise(resolve => { received = resolve; });
+        const before = proxy.requests.length;
+        const pending = checkProxy(proxy.url, options);
+        await arrived;
+        options.ipProbeURL = 'http://unselected.invalid/';
+        options.lookupIp = async () => { throw new Error('replacement adapter must not execute'); };
+        release();
+        const result = await pending;
+        assert.equal(result.ok, true);
+        assert.deepEqual(proxy.requests.slice(before), diagnostics ? [targetURL, ipProbeURL] : [targetURL]);
+        assert.equal(calls, diagnostics ? 1 : 0);
+        if (diagnostics) assert.equal(result.ip.lookup.ok, true);
+        else assert.equal(result.ip, undefined);
+    }
+});

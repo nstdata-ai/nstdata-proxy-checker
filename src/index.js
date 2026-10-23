@@ -22,8 +22,9 @@ function configuration(proxyURL, options = {}) {
 
 /** Optional IP diagnostics leave the target check and its result unchanged. */
 export async function checkProxy(proxyURL, options = {}) {
-    const result = await checkOnce(proxyURL, options);
-    return addIpDiagnostics(result, proxyURL, options, checkOnce);
+    const snapshot = { ...options };
+    const result = await checkOnce(proxyURL, snapshot);
+    return addIpDiagnostics(result, proxyURL, snapshot, checkOnce);
 }
 
 /** One local probe through the configured gateway; no hosted checker or Crawl key. */
