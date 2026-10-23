@@ -2,7 +2,7 @@
 
 [Back to quick start](../README.md) · [中文](guide_zh.md)
 
-[Connections](#connections) · [CLI and batches](#cli-and-batches) · [Content and results](#content-and-results) · [Checking library](#checking-library) · [Shared transport](#shared-transport) · [Errors](#errors)
+[Connections](#connections) · [CLI and batches](#cli-and-batches) · [Content and results](#content-and-results) · [Checking library](#checking-library) · [Shared transport](#shared-transport) · [Exit information](#exit-ip-and-information) · [Errors](#errors)
 
 ## Connections
 
@@ -30,13 +30,16 @@ npx --no-install nstdata-proxy-checker --file /path/to/proxies.json --target htt
 | `--format` | `json` | `json` or `csv` output |
 | `--expected-text` | None | Nonempty, case-sensitive literal, at most 4096 UTF-8 bytes |
 | `NSTDATA_PROXY_CA_FILE` | None | Absolute path to an additional trusted PEM CA |
+| `--ip-probe` | None | One extra proxy GET; supports plain IP, JSON `ip` or successful Nstdata `data.ip` envelopes |
+| `--ip-info` | Off | Query the observed IP using the optional `@nstdata-ai/ip-lookup` package |
+| `NSTDATA_IP_LOOKUP_BASE_URL` | Lookup package default | CLI lookup service address; does not change the proxy target |
 | `--help` / `-h` | — | Print usage without a probe |
 
-JSON returns `total/succeeded/failed/results` in input order. CSV has one row per input with fixed columns `index,ok,protocol,probeRequested,statusCode,elapsedMs,observedIp,contentMatched,errorCode`; unknown values are blank. Output omits proxy URLs, credentials and response bodies.
+JSON returns `total/succeeded/failed/results` in input order. CSV has one row per input with default columns `index,ok,protocol,probeRequested,statusCode,elapsedMs,observedIp,contentMatched,errorCode`; unknown values are blank. Output omits proxy URLs, credentials and response bodies.
 
 | Exit | Meaning |
 |---|---|
-| 0 | All entries pass |
+| 0 | All target checks pass; extra probe/lookup failures are reported independently |
 | 1 | At least one failed row, including invalid file entries or CA-loading failures |
 | 2 | Invocation rejected, such as invalid document or common arguments |
 | 130 | SIGINT/SIGTERM interruption stops active and queued work |
@@ -59,7 +62,7 @@ By default, HTTP health means a 2xx response. Assertions use the complete valid 
 | `probeRequested` | `boolean` | Local transport invocation began; not proof of target arrival |
 | `statusCode` | `number` / `null` | HTTP status of a completely obtained response, otherwise unknown |
 | `elapsedMs` | `number` / `null` | Transport invocation through complete body decoding, excluding setup, assertion and MCP overhead |
-| `observedIp` | `string` / `null` | Only valid plain-IP or JSON `ip` echoes; normal HTML remains unknown |
+| `observedIp` | `string` / `null` | Valid plain-IP, JSON `ip` or successful Nstdata `data.ip` echoes; normal HTML remains unknown |
 | `contentMatched` | `boolean` / `null` or absent | Present when asserting; null means no reliable assessment |
 | `error.code` | `string`, on failure | Failure category, below |
 
@@ -128,10 +131,79 @@ Gateway and target certificates remain verified, with `caFile` adding trust. Eac
 
 **Bodies and headers are unredacted, untrusted data.** Filter them before logs, terminals or AI clients. `checkProxy` does not return these raw contents. Target non-2xx statuses remain response data rather than transport scoring. Gateway/CONNECT 407 means proxy-auth failure; a 407 from an HTTPS target inside an established tunnel is a target HTTP response.
 
+## Exit IP and information
+
+### CLI
+
+The default check visits the target once; ordinary HTML does not reveal an exit IP. To keep the target check and add an exit probe, use the public Nstdata echo endpoint:
+
+```sh
+npx --no-install nstdata-proxy-checker --target https://example.com/ --ip-probe https://api.nstdata.io/api/v2/public/utility/client-ip
+```
+
+Location/ISP/ASN lookup is optional. Install the lookup package in the same application. The installation command applies after its publication; see Contributing for local archive installation before publication.
+
+```sh
+npm install @nstdata-ai/ip-lookup@1.0.0
+npx --no-install nstdata-proxy-checker --target https://example.com/ --ip-probe https://api.nstdata.io/api/v2/public/utility/client-ip --ip-info
+```
+
+You can choose another authorized echo URL. Supported responses are a plain IPv4/IPv6 address, `{"ip":"address"}`, or a Nstdata envelope with `code=200,err=false,data.ip`. Other content stays unknown.
+
+`--ip-info` queries only an observed IP. Omit `--ip-probe` if the target itself returns an IP to reuse that response. Ordinary content, failed echo responses or missing IPs never trigger lookup. A missing optional package produces `IP_LOOKUP_NOT_INSTALLED` before any network request. The default installation does not install the lookup package.
+
+Lookup contacts Nstdata through the lookup package with the explicit observed IP. It does not reuse the tested proxy transport or its credentials. Service rate limits and data-use conditions apply independently; batches can have partial lookup failures. No automatic retries, retry queue or provider fallback are added. Review service and data-use terms before using lookup results.
+
+### Results
+
+Existing top-level `observedIp`, `statusCode`, `elapsedMs` and `ok` always describe the target check. IP options add an `ip` object:
+
+| Field | Meaning |
+|---|---|
+| `ip.source` | `target-response` reuses the target response; `separate-probe` is another echo request |
+| `ip.observedIp` | IP from a successful 2xx response, or null when unavailable |
+| `ip.probe` | Extra echo request only, with its own status, timing and error |
+| `ip.lookup.requested` | Whether the lookup function was invoked, not proof of arrival at the service |
+| `ip.lookup.ok` | Lookup success, independent of target health |
+| `ip.lookup.result` | Source, retrieval/source timestamps, cache marker and validated information summary |
+| `ip.lookup.error.code` | Failure or skip reason, such as `IP_NOT_OBSERVED`, `HTTP_ERROR` or `TIMEOUT`; service errors also retain valid `statusCode`/`apiCode` |
+
+The summary keeps `query` and available country, country code, region, city, timezone, ISP, organization, AS/AS name and mobile/proxy/hosting fields. Missing fields are omitted; null and false are preserved. An unknown source update time stays null; retrieval time is not database freshness. Use the independent lookup tool for other fields. Provider classifications do not prove proxy type, reputation or exact location.
+
+**Separate requests can use different exits.** `separate-probe` identifies only what the echo endpoint observed. The same gateway and credentials do not prove the preceding target request used that IP. Gateway hostname/port are input configuration, not the exit IP.
+
+Each valid entry makes at most one target GET, one additional proxy GET when an echo URL is supplied, and one lookup function call when requested and an IP is available. HTTPS CONNECT is separate. Each step has its own `timeoutMs`; three steps can take nearly three times that period. Use `signal` to bound an entire batch. Cancellation prevents subsequent work and retains completed target results. CLI signal cancellation still exits 130.
+
+With IP options, CSV appends `ipSource,exitIp,ipProbeErrorCode,ipLookupErrorCode,country,regionName,city,isp,as,ipLookupStatusCode`; unknown values stay blank. Text beginning with `= + - @` (including leading whitespace) is prefixed with an apostrophe to prevent spreadsheet formula execution. Probe/lookup failures do not change target-based success counts or exit 0/1; inspect their own fields.
+
+### Node.js composition
+
+The library does not load the lookup package automatically. Pass its `lookupIp` function explicitly. Both `ipProbeURL` and `lookupIp` are optional and work with batches. Custom lookup functions must accept the explicit IP plus timeout/byte-limit/signal options and return the lookup package's result shape. Mismatched IPs and invalid fields are rejected.
+
+```js
+import { checkProxy } from '@nstdata-ai/proxy-checker';
+import { lookupIp } from '@nstdata-ai/ip-lookup';
+
+const proxyURL = process.env.NSTDATA_PROXY_URL;
+const ipProbeURL = process.env.NSTDATA_PROXY_IP_ECHO_URL ?? 'https://api.nstdata.io/api/v2/public/utility/client-ip';
+if (!proxyURL) throw new Error('Set NSTDATA_PROXY_URL');
+const result = await checkProxy(proxyURL, {
+    targetURL: process.env.NSTDATA_PROXY_CHECK_URL ?? 'https://example.com/',
+    ipProbeURL,
+    lookupIp,
+    timeoutMs: 20000,
+});
+console.log(result);
+if (!result.ok) process.exitCode = 1;
+```
+
 ## Errors
 
 | Code | Meaning / action |
 |---|---|
+| `IP_LOOKUP_NOT_INSTALLED` | Install the optional lookup package before enabling CLI information lookup; no probe is sent |
+| `IP_NOT_OBSERVED` | No usable observed IP; check echo format and status |
+| `IP_LOOKUP_FAILED` | Invalid lookup summary, mismatched IP or another unknown lookup error |
 | `INVALID_CONFIG` | Check proxy syntax, option ranges, target and CA path/content |
 | `INVALID_INPUT_FILE` / `INVALID_INPUT` | CLI file/input cannot be read/parsed; check protected files and JSON |
 | `PROXY_AUTHORIZATION_FAILED` | Gateway or CONNECT rejected credentials; check generated connection |
@@ -146,4 +218,4 @@ Gateway and target certificates remain verified, with `caFile` adding trust. Eac
 | `INVALID_RESPONSE` / `UNSUPPORTED_RESPONSE` / `UNSUPPORTED_ENCODING` | Invalid proxy response, protocol upgrade or unsupported encoding |
 | `UPSTREAM_ERROR` / `CHECK_FAILED` | Other transport/check failure; use a minimal redacted reproduction |
 
-Checks do not replace PM routing verification, IP-data lookup or real business-target acceptance.
+Checks do not replace PM routing verification, data-source verification or real business-scenario acceptance.

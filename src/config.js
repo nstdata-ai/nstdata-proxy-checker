@@ -3,6 +3,13 @@ import { isAbsolute } from 'node:path';
 
 const reserved = new Set(['host', 'connection', 'proxy-authorization', 'proxy-authenticate', 'proxy-connection', 'transfer-encoding', 'content-length', 'upgrade', 'te', 'trailer', 'keep-alive']);
 
+export function proxySecrets(proxyURL) {
+    const gateway = new URL(proxyURL);
+    const secrets = [proxyURL, gateway.username, gateway.password, decodeURIComponent(gateway.username), decodeURIComponent(gateway.password)];
+    if (gateway.username || gateway.password) secrets.push(Buffer.from(`${decodeURIComponent(gateway.username)}:${decodeURIComponent(gateway.password)}`).toString('base64'));
+    return secrets;
+}
+
 export function validateSettings({ proxyURL, timeoutMs = 20000, maxResponseBytes = 1048576, caFile }) {
     if (typeof proxyURL !== 'string' || proxyURL.length > 8192) throw new Error();
     const gateway = new URL(proxyURL);

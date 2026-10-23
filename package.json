@@ -30,6 +30,12 @@
     "node": "^22.18.0 || ^24.0.0"
   },
   "license": "MIT",
+  "peerDependencies": {
+    "@nstdata-ai/ip-lookup": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@nstdata-ai/ip-lookup": { "optional": true }
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "check:package": "node scripts/check-package.mjs",

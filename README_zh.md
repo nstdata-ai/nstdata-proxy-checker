@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-通过 HTTP／HTTPS 代理访问指定目标，检查 HTTP 状态、请求耗时和可选正文断言。提供 CLI、Node.js 库及可复用代理传输；无运行时依赖，无需 Crawl Key。
+通过 HTTP／HTTPS 代理访问指定目标，检查 HTTP 状态、请求耗时和可选正文断言；可选探测出口 IP 并查询地域／ISP／ASN 摘要。提供 CLI、Node.js 库及可复用代理传输；无必装运行时依赖，无需 Crawl Key。
 
 ## 功能入口
 
@@ -13,6 +13,7 @@
 | 验证目标正文，而不只看 2xx | [正文检查](docs/guide_zh.md#正文检查与结果解释) | 字面文本匹配或未知状态 |
 | 在 Node.js 中执行检测 | [检测库](docs/guide_zh.md#检测库) | `checkProxy`／`checkProxies` |
 | 自行处理代理响应 | [共享传输](docs/guide_zh.md#共享传输) | GET／HEAD、响应字节与响应头 |
+| 查看出口 IP 和可选地域／ASN 摘要 | [出口信息](docs/guide_zh.md#出口-ip-与详细信息) | 明确区分目标响应、额外探测和信息查询 |
 
 ## 安装
 
@@ -34,6 +35,8 @@ npx --no-install nstdata-proxy-checker --target https://example.com/ --timeout 2
 
 默认输出 JSON。`ok: true` 表示目标返回 2xx；`statusCode` 是响应状态，`elapsedMs` 是请求至正文读取解码完成的耗时。失败检查 `error.code`；完整字段说明见[结果解释](docs/guide_zh.md#正文检查与结果解释)。
 
-检测会使用真实代理流量。每条有效输入最多执行一次目标 GET，包括重复项；不跳转、重试、轮换或回退直连。2xx 不证明正文正确、出口身份或 PM 路由符合预期，正文核验需设置 `--expected-text`。
+检测会使用真实代理流量。默认每条有效输入最多执行一次目标 GET，包括重复项；不跳转、重试、轮换或回退直连。2xx 不证明正文正确、出口身份或 PM 路由符合预期，正文核验需设置 `--expected-text`。
+
+`--ip-probe` 显式增加一次出口回显 GET；`--ip-info` 使用单独安装的 `@nstdata-ai/ip-lookup` 查询观测到的 IP。查询失败不改变目标检测结论，轮换代理的额外探测不代表原目标请求的出口。
 
 [完整指南](docs/guide_zh.md) · [变更记录](CHANGELOG.md) · [贡献说明](CONTRIBUTING.md) · [安全反馈](SECURITY.md) · [MIT 许可](LICENSE)
