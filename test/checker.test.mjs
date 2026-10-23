@@ -294,3 +294,18 @@ test('content assertions reject malformed UTF-8 without scoring replacement char
     assert.equal(valid.contentMatched, true);
     assert.equal(proxy.rows.length, 6);
 });
+
+
+test('assertion output limits preserve completed HTTP status and measured timing', async t => {
+    for (const statusCode of [200, 403]) {
+        const proxy = await gateway(t, (_req, res) => { res.writeHead(statusCode); res.end('x'.repeat(17000)); });
+        const result = await checkProxy(proxy.url, { targetURL, expectedText: 'x' });
+        assert.equal(result.ok, false);
+        assert.equal(result.statusCode, statusCode);
+        assert.ok(Number.isFinite(result.elapsedMs) && result.elapsedMs >= 0);
+        assert.equal(result.contentMatched, null);
+        assert.equal(result.error.code, statusCode === 200 ? 'OUTPUT_LIMIT' : 'TARGET_HTTP_ERROR');
+        assert.equal(proxy.rows.length, 1);
+        assert.doesNotMatch(JSON.stringify(result), /x{20}/);
+    }
+});

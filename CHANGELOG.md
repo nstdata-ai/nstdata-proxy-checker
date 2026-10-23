@@ -2,15 +2,12 @@
 
 ## 1.1.0 — Unreleased
 
-- Replace the internal MCP client/server round trip with a native HTTP/HTTPS transport; remove all runtime dependencies.
-- Export the transport at `/transport` and add declarations for both library entries.
-- Preserve CLI arguments, result fields, error categories, assertion output cap, batch limits and exit codes.
-- Clarify pre-dispatch option format/range validation and CA-loading `INVALID_CONFIG` rows (CLI exit 1).
-- Measure elapsed time through body decoding, excluding transport setup and content assessment. Results no longer include MCP call overhead.
-- Reject malformed UTF-8 in content assertions instead of matching replacement characters; preserve ordinary HTTP health checks.
-- Distinguish gateway/CONNECT authentication failures from an HTTPS target returning 407 inside an established tunnel.
-- Keep TLS verification, proxy-only authentication, cancellation, response limits and refusal of redirects/retries/direct fallback.
-
-## 1.0.0 — Local snapshot, unpublished
-
-Initial CLI/library candidate with bounded batches, literal content assertions, JSON/CSV output and a pinned MCP/Crawl dependency graph. Retained local artifacts use that graph; they do not contain the 1.1.0 transport.
+- Provide an independent HTTP/HTTPS proxy checker as a CLI and Node.js library, with no runtime dependencies.
+- Support ordered batches, bounded concurrency, cancellation, literal content assertions and JSON/CSV output.
+- Export a reusable GET/HEAD transport with declarations at `/transport`.
+- Verify gateway and target certificates/hostnames, isolate proxy authentication and bound downloaded/decoded responses.
+- Refuse redirects, retries and direct fallback; keep target HTTP, authentication, TLS and content failures distinct.
+- Preserve completed HTTP status and measured time when content assessment exceeds its output cap; non-2xx takes precedence over the assessment cap.
+- Classify incomplete certificate-chain verification failures as TLS errors.
+- Measure duration through complete body decoding; report unknown values explicitly and omit credentials/response bodies from checker results.
+- Include bilingual workflow guides and installed-package, TLS, CLI and documentation-example checks.

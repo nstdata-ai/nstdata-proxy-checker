@@ -103,3 +103,16 @@ test('an HTTPS target 407 stays target data after an authenticated CONNECT', { t
     assert.ok(proxy.connections.every(connection => /^Basic /.test(connection.headers['proxy-authorization'])));
     assert.doesNotMatch(JSON.stringify(result), /private target diagnostic|fixture-user|fixture-password/);
 });
+
+
+test('an incomplete gateway certificate chain is a TLS error', { timeout: 15000 }, async t => {
+    const material = tlsMaterial(t, { missingIntermediate: true });
+    const port = await listen(t, https.createServer(material, (_req, res) => res.end('must not be read')));
+    const proxyURL = `https://localhost:${port}`;
+    const options = { proxyURL, caFile: material.certFile };
+    await assert.rejects(createProxyTransport(options).request({ url: 'http://target.invalid/' }), { code: 'TLS_ERROR' });
+    const result = await checkProxy(proxyURL, { targetURL: 'http://target.invalid/', caFile: material.certFile });
+    assert.equal(result.error.code, 'TLS_ERROR');
+    assert.equal(result.statusCode, null);
+    assert.equal(result.elapsedMs, null);
+});

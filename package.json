@@ -22,7 +22,9 @@
     "README_zh.md",
     "LICENSE",
     "CHANGELOG.md",
-    "CONTRIBUTING.md"
+    "CONTRIBUTING.md",
+    "docs",
+    "SECURITY.md"
   ],
   "engines": {
     "node": "^22.18.0 || ^24.0.0"

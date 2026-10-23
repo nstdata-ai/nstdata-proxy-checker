@@ -195,7 +195,7 @@ async function requestThroughProxy(proxyURL, input, signal, maxBytes, ca) {
         const code = error?.code ?? '';
         if (code === 'HPE_HEADER_OVERFLOW')
             throw new ProxyTransportError('RESPONSE_LIMIT', 'Response headers exceed the 16 KiB limit.');
-        if (/CERT|^ERR_TLS_|^EPROTO$/.test(code))
+        if (/CERT|^ERR_TLS_|^EPROTO$|^UNABLE_TO_VERIFY_LEAF_SIGNATURE$/.test(code))
             throw new ProxyTransportError('TLS_ERROR', 'TLS verification or handshake failed. Check the trusted CA and hostname.');
         throw error;
     }

@@ -3,17 +3,32 @@ import https from 'node:https';
 import net from 'node:net';
 import { once } from 'node:events';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-export function tlsMaterial(t, { san = 'DNS:localhost,IP:127.0.0.1', commonName = 'localhost' } = {}) {
+export function tlsMaterial(t, { san = 'DNS:localhost,IP:127.0.0.1', commonName = 'localhost', missingIntermediate = false } = {}) {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'nstdata-proxy-tls-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const keyFile = path.join(dir, 'key.pem'), certFile = path.join(dir, 'cert.pem');
     execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyFile, '-out', certFile,
         '-days', '1', '-subj', `/CN=${commonName}`, '-addext', `subjectAltName=${san}`,
         '-addext', 'basicConstraints=critical,CA:TRUE'], { stdio: 'pipe', timeout: 10000 });
+    if (missingIntermediate) {
+        const run = args => execFileSync('openssl', args, { stdio: 'pipe', timeout: 10000 });
+        const file = name => path.join(dir, name);
+        writeFileSync(file('intermediate.ext'), 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n');
+        writeFileSync(file('leaf.ext'), `basicConstraints=critical,CA:FALSE\nsubjectAltName=${san}\nextendedKeyUsage=serverAuth\n`);
+        for (const name of ['intermediate', 'leaf']) {
+            run(['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-keyout', file(name + '.key'),
+                '-out', file(name + '.csr'), '-subj', `/CN=${name === 'leaf' ? commonName : 'Fixture intermediate'}`]);
+            run(['x509', '-req', '-in', file(name + '.csr'), '-CA', name === 'leaf' ? file('intermediate.pem') : certFile,
+                '-CAkey', name === 'leaf' ? file('intermediate.key') : keyFile, '-CAcreateserial',
+                '-out', file(name + '.pem'), '-days', '1', '-extfile', file(name + '.ext')]);
+        }
+        // Trust the root, but deliberately omit the intermediate from the presented chain.
+        return { key: readFileSync(file('leaf.key')), cert: readFileSync(file('leaf.pem')), certFile };
+    }
     return { key: readFileSync(keyFile), cert: readFileSync(certFile), certFile };
 }
 

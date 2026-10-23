@@ -41,11 +41,12 @@ export async function checkProxy(proxyURL, options = {}) {
         const secrets = [proxyURL, gateway.username, gateway.password, decodeURIComponent(gateway.username), decodeURIComponent(gateway.password)];
         if (gateway.username || gateway.password) secrets.push(Buffer.from(`${decodeURIComponent(gateway.username)}:${decodeURIComponent(gateway.password)}`).toString('base64'));
         const sensitive = value => secrets.some(secret => secret && value.includes(secret));
-        // Keep the original assertion output cap independently of the MCP protocol.
+        // Bound assertion assessment separately from the transport response-size limit.
         const envelope = { statusCode: response.statusCode, encoding: 'utf-8', body,
             headers: { 'content-type': response.headers['content-type'], location: response.headers.location, 'retry-after': response.headers['retry-after'] } };
         if (assessContent && JSON.stringify(envelope).length > 16000) {
-            return { ...empty, probeRequested, error: { code: 'OUTPUT_LIMIT' } };
+            return { ...empty, probeRequested, statusCode: response.statusCode, elapsedMs,
+                error: { code: response.statusCode < 200 || response.statusCode >= 300 ? 'TARGET_HTTP_ERROR' : 'OUTPUT_LIMIT' } };
         }
         let address = body.trim();
         try { address = JSON.parse(address)?.ip; } catch { /* Plain IP responses are also supported. */ }
