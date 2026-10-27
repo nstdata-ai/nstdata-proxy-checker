@@ -34,7 +34,9 @@
     "@nstdata-ai/ip-lookup": "^1.0.0"
   },
   "peerDependenciesMeta": {
-    "@nstdata-ai/ip-lookup": { "optional": true }
+    "@nstdata-ai/ip-lookup": {
+      "optional": true
+    }
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
@@ -43,6 +45,15 @@
   },
   "devDependencies": {
     "@types/node": "22.18.0",
+    "marked": "18.1.1",
     "typescript": "5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nstdata-ai/nstdata-proxy-checker.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   }
 }

@@ -102,7 +102,7 @@ async function requestThroughProxy(proxyURL, input, signal, maxBytes, ca) {
                 });
                 connect.once('connect', (response, socket, head) => {
                     responded = true;
-                    if (response.statusCode !== 200) {
+                    if (response.statusCode < 200 || response.statusCode >= 300) {
                         socket.destroy();
                         connect.destroy();
                         reject(response.statusCode === 407

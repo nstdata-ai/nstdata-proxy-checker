@@ -70,7 +70,7 @@ export async function proxyFixture(t, options = {}) {
         if (options.connectStatus) { client.end(`HTTP/1.1 ${options.connectStatus} Denied\r\nContent-Length: 0\r\n\r\n`); return; }
         const port = Number(req.url.slice(req.url.lastIndexOf(':') + 1));
         const upstream = net.connect(port, '127.0.0.1', () => {
-            client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+            client.write(`HTTP/1.1 ${options.successStatus ?? 200} Connection Established\r\n\r\n`);
             if (head.length) upstream.write(head);
             upstream.pipe(client); client.pipe(upstream);
         });

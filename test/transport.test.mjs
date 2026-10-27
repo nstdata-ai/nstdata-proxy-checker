@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
-import { gzipSync } from 'node:zlib';
+import { gzipSync, deflateSync, brotliCompressSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { tlsMaterial, listen, proxyFixture } from './proxy-fixtures.mjs';
@@ -115,4 +115,54 @@ test('an incomplete gateway certificate chain is a TLS error', { timeout: 15000 
     assert.equal(result.error.code, 'TLS_ERROR');
     assert.equal(result.statusCode, null);
     assert.equal(result.elapsedMs, null);
+});
+
+
+test('CONNECT accepts every successful 2xx tunnel status and rejects non-success responses', { timeout: 15000 }, async t => {
+    const material = tlsMaterial(t), received = [];
+    const port = await listen(t, https.createServer(material, (req, res) => {
+        received.push(req.headers);
+        res.end('tunneled response');
+    }));
+    const url = `https://localhost:${port}/`;
+    for (const tls of [undefined, material]) {
+        for (const successStatus of [200, 201, 204, 299]) {
+            const proxy = await proxyFixture(t, { tls, successStatus });
+            const transport = createProxyTransport({ proxyURL: proxy.url, caFile: material.certFile });
+            const result = await transport.request({ url });
+            assert.equal(result.statusCode, 200, 'Expose the target HTTP status, not the CONNECT status');
+            assert.equal(result.body.toString(), 'tunneled response');
+            assert.equal(proxy.connections.length, 1);
+            assert.match(proxy.connections[0].headers['proxy-authorization'], /^Basic /);
+            assert.equal(received.at(-1)['proxy-authorization'], undefined);
+        }
+    }
+    assert.equal(received.length, 8);
+    for (const connectStatus of [300, 407, 502]) {
+        const proxy = await proxyFixture(t, { connectStatus });
+        const transport = createProxyTransport({ proxyURL: proxy.url, caFile: material.certFile });
+        await assert.rejects(transport.request({ url }), { code: connectStatus === 407 ? 'PROXY_AUTHORIZATION_FAILED' : 'PROXY_CONNECT_FAILED' });
+        assert.equal(proxy.connections.length, 1);
+    }
+    assert.equal(received.length, 8, 'Rejected CONNECT responses must not reach the target');
+});
+
+
+test('gzip, deflate and Brotli preserve content and enforce decoded byte limits', async t => {
+    const encoders = { gzip: gzipSync, deflate: deflateSync, br: brotliCompressSync };
+    let requests = 0;
+    const port = await listen(t, http.createServer((req, res) => {
+        requests++;
+        const [encoding, mode] = new URL(req.url).pathname.slice(1).split('/');
+        res.writeHead(200, { 'Content-Encoding': encoding });
+        res.end(mode === 'invalid' ? Buffer.from('invalid compressed bytes')
+            : encoders[encoding](mode === 'large' ? 'x'.repeat(2000) : 'decoded content'));
+    }));
+    const transport = createProxyTransport({ proxyURL: `http://127.0.0.1:${port}`, maxResponseBytes: 256 });
+    for (const encoding of Object.keys(encoders)) {
+        assert.equal((await transport.request({ url: `http://target.invalid/${encoding}/normal` })).body.toString(), 'decoded content');
+        await assert.rejects(transport.request({ url: `http://target.invalid/${encoding}/large` }), { code: 'RESPONSE_LIMIT' });
+        await assert.rejects(transport.request({ url: `http://target.invalid/${encoding}/invalid` }), { code: 'INVALID_RESPONSE' });
+    }
+    assert.equal(requests, 9, 'No rejected response is retried');
 });

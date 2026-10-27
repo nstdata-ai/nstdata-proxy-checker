@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-通过 HTTP／HTTPS 代理访问指定目标，检查 HTTP 状态、请求耗时和可选正文断言；可选探测出口 IP 并查询地域／ISP／ASN 摘要。提供 CLI、Node.js 库及可复用代理传输；无必装运行时依赖，无需 Crawl Key。
+通过 HTTP／HTTPS 代理访问指定目标，检查 HTTP 状态、请求耗时和可选正文断言；可选探测出口 IP。提供 CLI、Node.js 库及可复用代理传输；无必装运行时依赖，无需 Crawl Key。
 
 ## 功能入口
 
@@ -13,16 +13,14 @@
 | 验证目标正文，而不只看 2xx | [正文检查](docs/guide_zh.md#正文检查与结果解释) | 字面文本匹配或未知状态 |
 | 在 Node.js 中执行检测 | [检测库](docs/guide_zh.md#检测库) | `checkProxy`／`checkProxies` |
 | 自行处理代理响应 | [共享传输](docs/guide_zh.md#共享传输) | GET／HEAD、响应字节与响应头 |
-| 查看出口 IP 和可选地域／ASN 摘要 | [出口信息](docs/guide_zh.md#出口-ip-与详细信息) | 明确区分目标响应、额外探测和信息查询 |
+| 查看出口 IP | [出口信息](docs/guide_zh.md#出口-ip-与详细信息) | 明确区分目标响应和额外回显探测 |
 
 ## 安装
 
 支持 Node.js 22（22.18 及以上）和 24。
 
-> 1.1.0 尚未在 npm 发布。从源码安装见[贡献说明](CONTRIBUTING.md)。
-
 ```sh
-npm install @nstdata-ai/proxy-checker@1.1.0
+npm install @nstdata-ai/proxy-checker
 ```
 
 ## 快速开始
@@ -37,6 +35,6 @@ npx --no-install nstdata-proxy-checker --target https://example.com/ --timeout 2
 
 检测会使用真实代理流量。默认每条有效输入最多执行一次目标 GET，包括重复项；不跳转、重试、轮换或回退直连。2xx 不证明正文正确、出口身份或 PM 路由符合预期，正文核验需设置 `--expected-text`。
 
-`--ip-probe` 显式增加一次出口回显 GET；`--ip-info` 使用单独安装的 `@nstdata-ai/ip-lookup` 查询观测到的 IP。查询失败不改变目标检测结论，轮换代理的额外探测不代表原目标请求的出口。
+`--ip-probe` 显式增加一次出口回显 GET；轮换代理的额外探测不代表原目标请求的出口。地域／ISP／ASN 信息需要[另行提供查询服务](docs/guide_zh.md#可选查询集成)。
 
 [完整指南](docs/guide_zh.md) · [变更记录](CHANGELOG.md) · [贡献说明](CONTRIBUTING.md) · [安全反馈](SECURITY.md) · [MIT 许可](LICENSE)
