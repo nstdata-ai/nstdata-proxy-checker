@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { readFile, stat } from 'node:fs/promises';
+import { isUtf8 } from 'node:buffer';
 import { checkProxies, ProxyCheckError } from './index.js';
 
 try {
@@ -13,10 +14,12 @@ try {
         const format = values.format ?? 'json';
         if (!['json', 'csv'].includes(format)) throw new ProxyCheckError('INVALID_CONFIG');
         let proxies;
-        if (values.file) {
+        if (values.file !== undefined) {
             const info = await stat(values.file);
             if (!info.isFile() || info.size > 1048576) throw new ProxyCheckError('INVALID_INPUT_FILE');
-            proxies = JSON.parse(await readFile(values.file, 'utf8'));
+            const content = await readFile(values.file);
+            if (content.length > 1048576 || !isUtf8(content)) throw new ProxyCheckError('INVALID_INPUT_FILE');
+            proxies = JSON.parse(content.toString('utf8'));
         } else proxies = [process.env.NSTDATA_PROXY_URL];
         let lookupIp;
         if (values['ip-info']) {
@@ -31,7 +34,7 @@ try {
             const result = await checkProxies(proxies, { targetURL: values.target ?? process.env.NSTDATA_PROXY_CHECK_URL,
                 timeoutMs: values.timeout === undefined ? 20000 : Number(values.timeout),
                 concurrency: values.concurrency === undefined ? 1 : Number(values.concurrency),
-                invalidInput: values.file ? 'report' : 'reject', expectedText: values['expected-text'],
+                invalidInput: values.file !== undefined ? 'report' : 'reject', expectedText: values['expected-text'],
                 caFile: process.env.NSTDATA_PROXY_CA_FILE, signal: controller.signal,
                 ipProbeURL: values['ip-probe'], lookupIp: lookupIp && ((ip, options) => lookupIp(ip, {
                     ...options, baseURL: process.env.NSTDATA_IP_LOOKUP_BASE_URL,
