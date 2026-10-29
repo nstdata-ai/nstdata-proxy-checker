@@ -139,6 +139,21 @@ test('CLI help/missing inputs do not need a Crawl key or server process', async 
     assert.equal(JSON.parse(invalid.stderr).error.code, 'INVALID_CONFIG');
 });
 
+test('CLI rejects an explicit empty file path without using the environment proxy', async t => {
+    const proxy = await gateway(t);
+    const env = { NSTDATA_PROXY_URL: proxy.url };
+    const result = await cli(['--file', '', '--target', targetURL], env);
+    assert.equal(proxy.rows.length, 0);
+    assert.equal(result.code, 2);
+    assert.equal(result.stdout, '');
+    assert.equal(JSON.parse(result.stderr).error.code, 'INVALID_INPUT');
+
+    const withoutFile = await cli(['--target', targetURL], env);
+    assert.equal(withoutFile.code, 0);
+    assert.equal(JSON.parse(withoutFile.stdout).succeeded, 1);
+    assert.equal(proxy.rows.length, 1);
+});
+
 test('CLI protected batch file produces no credentials in either stream', async t => {
     const proxy = await gateway(t);
     const temp = await mkdtemp(join(tmpdir(), 'nstdata-checker-'));
@@ -150,6 +165,30 @@ test('CLI protected batch file produces no credentials in either stream', async 
     assert.equal(result.code, 0); assert.equal(JSON.parse(result.stdout).succeeded, 1);
     assert.equal(result.stderr, '');
     assert.doesNotMatch(result.stdout + result.stderr, /sensitive-user|sensitive-password|Basic/);
+});
+
+test('CLI rejects invalid UTF-8 input before probing and preserves valid Unicode credentials', async t => {
+    const proxy = await gateway(t);
+    const temp = await mkdtemp(join(tmpdir(), 'nstdata-checker-utf8-'));
+    t.after(() => rm(temp, { recursive: true, force: true }));
+    const file = join(temp, 'input.json');
+    const port = new URL(proxy.url).port;
+    await writeFile(file, Buffer.concat([Buffer.from('["http://fixture-user:pass'),
+        Buffer.from([0xff]), Buffer.from(`word@127.0.0.1:${port}/"]`)]), { mode: 0o600 });
+    const invalid = await cli(['--file', file, '--target', targetURL]);
+    assert.equal(invalid.code, 2);
+    assert.equal(invalid.stdout, '');
+    assert.equal(JSON.parse(invalid.stderr).error.code, 'INVALID_INPUT_FILE');
+    assert.equal(proxy.rows.length, 0);
+    assert.doesNotMatch(invalid.stderr, /fixture-user|pass|word|127\.0\.0\.1/);
+
+    await writeFile(file, JSON.stringify([`http://用户:密码@127.0.0.1:${port}/`]), { mode: 0o600 });
+    const valid = await cli(['--file', file, '--target', targetURL]);
+    assert.equal(valid.code, 0);
+    assert.equal(JSON.parse(valid.stdout).succeeded, 1);
+    assert.equal(proxy.rows.length, 1);
+    assert.equal(proxy.rows[0].auth, `Basic ${Buffer.from('用户:密码').toString('base64')}`);
+    assert.doesNotMatch(valid.stdout + valid.stderr, /用户|密码|Basic/);
 });
 
 test('content assertion uses one GET, preserves default behavior and suppresses body/expectation', async t => {

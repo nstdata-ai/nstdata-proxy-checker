@@ -4,6 +4,7 @@
 
 - Provide an independent HTTP/HTTPS proxy checker as a CLI and Node.js library, with no required runtime dependencies.
 - Support ordered batches, bounded concurrency, cancellation, literal content assertions and JSON/CSV output.
+- Reject invalid UTF-8 proxy files and explicit empty file paths before sending requests; preserve valid Unicode credentials.
 - Export a reusable GET/HEAD transport with declarations at `/transport`.
 - Verify gateway and target certificates/hostnames, isolate proxy authentication and bound downloaded/decoded responses.
 - Refuse redirects, retries and direct fallback; keep target HTTP, authentication, TLS and content failures distinct.
