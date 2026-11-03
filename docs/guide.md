@@ -2,15 +2,42 @@
 
 [Back to quick start](../README.md) · [中文](guide_zh.md)
 
-[Connections](#connections) · [CLI and batches](#cli-and-batches) · [Content and results](#content-and-results) · [Checking library](#checking-library) · [Shared transport](#shared-transport) · [Exit information](#exit-ip-and-information) · [Errors](#errors)
+[Connections](#connections) · [Nstdata setup](#nstdata-setup) · [CLI and batches](#cli-and-batches) · [Content and results](#content-and-results) · [Checking library](#checking-library) · [Shared transport](#shared-transport) · [Exit information](#exit-ip-and-information) · [Errors](#errors)
 
 ## Connections
 
 Use the platform-generated `http://` or `https://` proxy URL, with URL-encoded username/password when present. Keep it in `NSTDATA_PROXY_URL` or a protected file instead of command-line arguments. HTTP/HTTPS gateways and HTTP/HTTPS targets are supported; HTTPS targets use CONNECT.
 
-SOCKS, browser interaction, channel management and automatic rotation are unsupported. TLS certificates and hostnames remain verified. Add a private CA using the absolute `NSTDATA_PROXY_CA_FILE` path (CLI) or `caFile` (library), without disabling verification.
+SOCKS, browser interaction and automatic rotation are unsupported. Nstdata mode can create an SDK default channel; it does not provide general channel administration. TLS certificates and hostnames remain verified. Add a private CA using the absolute `NSTDATA_PROXY_CA_FILE` path (CLI) or `caFile` (library), without disabling verification.
+
+## Nstdata setup
+
+Choose `--nstdata` when you have a Proxy API key and available account balance. The SDK selects a compatible product and country, reuses its default channel or creates one, and generates one HTTP connection. The checker then makes its normal target request. No proxy URL, channel ID or country is required for the default setup.
+
+```sh
+npx --no-install nstdata-proxy-checker --nstdata --env .env --yes
+```
+
+The `.env` file contains `NSTDATA_API_TOKEN`, as shown in the [quick start](../README.md#use-an-nstdata-api-key). Omit `--env` when the key is already in your shell. In a terminal, omit `--yes` to see the resolved product, country, reference price and whether a channel will be created before confirmation; missing keys use hidden input. In scripts, `--yes` is required. Only an explicit `--env` file is loaded; existing environment variables take precedence.
+
+| Option / environment | Default | Purpose |
+|---|---|---|
+| `--nstdata` | Off | Obtain one proxy and check it; ignores `NSTDATA_PROXY_URL`, conflicts with `--file` |
+| `--yes` | Off | Accept setup without a terminal prompt |
+| `--env` | None | Explicit environment file, used only with `--nstdata` |
+| `--country` | SDK selection | Require a supported country; no silent substitution |
+| `--channel` | SDK default channel | Require an existing channel instead of discovering or creating one |
+| `NSTDATA_API_TOKEN` | None | Proxy API key; never passed as a command-line argument |
+| `NSTDATA_TEAM_ID` | Account context | Explicit team context when required |
+| `NSTDATA_API_BASE_URL` | Official API | Advanced origin override; ordinary usage does not require it |
+
+A failed setup stops before the target check. Creation/generation is never retried automatically. `CHANNEL_CREATION_UNCERTAIN` or `PROXY_GENERATION_UNCERTAIN` means the remote operation may have completed: inspect the account before another run. Cancelling local waiting does not undo remote operations. Reuse `--channel` when strict sharing across machines is required; concurrent first runs on separate machines can create separate default channels.
+
+HTTP status and `elapsedMs` still describe the target request, excluding account setup. JSON/CSV results never include the API key, generated connection or channel ID. Optional IP probes/lookups retain their separate semantics. Account setup can use multiple bounded API requests; `--timeout` applies to each API or proxy request, not the whole command.
 
 ## CLI and batches
+
+The `npx --no-install` examples below require the package to be installed in the current project. For one-off use without a project dependency, use the [standalone CLI command](../README.md#install).
 
 ### Input and output
 
@@ -26,8 +53,8 @@ npx --no-install nstdata-proxy-checker \
 
 | Option / environment | Default | Purpose and limits |
 |---|---|---|
-| `--target` / `NSTDATA_PROXY_CHECK_URL` | One required | Target HTTP(S) URL without credentials; CLI wins |
-| `NSTDATA_PROXY_URL` | None | Proxy URL when `--file` is absent |
+| `--target` / `NSTDATA_PROXY_CHECK_URL` | Required, except Nstdata mode defaults to `https://example.com/` | Target HTTP(S) URL without credentials; CLI wins |
+| `NSTDATA_PROXY_URL` | None | Proxy URL when neither `--file` nor `--nstdata` is used |
 | `--file` | None | Protected JSON proxy-array file |
 | `--timeout` | 20000 ms | Per-probe deadline, integer 1–600000 |
 | `--concurrency` | 1 | Integer 1–4 |
@@ -44,7 +71,7 @@ JSON returns `total/succeeded/failed/results` in input order. CSV has one row pe
 | Exit | Meaning |
 |---|---|
 | 0 | All target checks pass; extra probe/lookup failures are reported independently |
-| 1 | At least one failed row, including invalid file entries or CA-loading failures |
+| 1 | Setup failure or at least one failed row, including invalid file entries or CA-loading failures |
 | 2 | Invocation rejected, such as invalid document or common arguments |
 | 130 | SIGINT/SIGTERM interruption stops active and queued work |
 
@@ -214,6 +241,8 @@ CLI `--ip-info` is an extension for installations that already supply `@nstdata-
 Lookup runs only when an observed IP is available; otherwise it reports `IP_NOT_OBSERVED`. It receives no proxy credentials. Provider access and data-use authorization are separate requirements. Lookup failures do not change target health, and no retry or fallback is added.
 
 ## Errors
+
+CLI input errors go to stderr with `error.code`, an actionable `error.message` and exit code 2. For example, a missing proxy names `NSTDATA_PROXY_URL` and explains that you can set it or use `--file`. The CLI reads its process environment; it does not automatically load settings from other projects or files. Result-row error codes are listed below.
 
 | Code | Meaning / action |
 |---|---|

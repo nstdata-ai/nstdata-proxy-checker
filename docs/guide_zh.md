@@ -2,15 +2,42 @@
 
 [返回快速开始](../README_zh.md) · [English](guide.md)
 
-[连接与协议](#连接与协议) · [命令行与批量检查](#命令行与批量检查) · [正文检查与结果解释](#正文检查与结果解释) · [检测库](#检测库) · [共享传输](#共享传输) · [出口信息](#出口-ip-与详细信息) · [错误与排查](#错误与排查)
+[连接与协议](#连接与协议) · [Nstdata 出号与检测](#nstdata-出号与检测) · [命令行与批量检查](#命令行与批量检查) · [正文检查与结果解释](#正文检查与结果解释) · [检测库](#检测库) · [共享传输](#共享传输) · [出口信息](#出口-ip-与详细信息) · [错误与排查](#错误与排查)
 
 ## 连接与协议
 
 代理连接使用平台生成的 `http://` 或 `https://` URL，可包含经 URL 编码的用户名和密码。放在 `NSTDATA_PROXY_URL` 或受保护文件中，避免作为命令行参数暴露。支持 HTTP／HTTPS 网关以及 HTTP／HTTPS 目标；HTTPS 目标使用 CONNECT。
 
-不支持 SOCKS、浏览器交互、通道管理或自动轮换。TLS 证书和主机名始终校验；私有 CA 可通过绝对路径 `NSTDATA_PROXY_CA_FILE`（CLI）或 `caFile`（库）额外信任，不关闭校验。
+不支持 SOCKS、浏览器交互或自动轮换。Nstdata 模式可创建 SDK 默认渠道，不提供通用渠道管理界面。TLS 证书和主机名始终校验；私有 CA 可通过绝对路径 `NSTDATA_PROXY_CA_FILE`（CLI）或 `caFile`（库）额外信任，不关闭校验。
+
+## Nstdata 出号与检测
+
+已有 Proxy API Key 和可用余额时，选择 `--nstdata`。SDK 解析可用产品和地区，复用默认渠道或创建一个渠道，并生成一条 HTTP 连接；随后执行正常的目标检测。默认配置不要求代理 URL、渠道 ID 或国家。
+
+```sh
+npx --no-install nstdata-proxy-checker --nstdata --env .env --yes
+```
+
+`.env` 中保存 `NSTDATA_API_TOKEN`，格式见[快速开始](../README_zh.md#使用-nstdata-api-key)。Key 已在当前终端时可省略 `--env`。在终端省略 `--yes`，会展示产品、地区、参考单价及是否创建渠道，确认后执行；缺少 Key 时隐藏输入。脚本必须显式使用 `--yes`。只加载明确指定的 `--env` 文件，已有环境变量优先。
+
+| 选项／环境变量 | 默认值 | 用途 |
+|---|---|---|
+| `--nstdata` | 关闭 | 获取一条代理并检测；忽略 `NSTDATA_PROXY_URL`，不能与 `--file` 同用 |
+| `--yes` | 关闭 | 接受配置并跳过终端确认 |
+| `--env` | 无 | 仅用于 `--nstdata` 的明确环境文件 |
+| `--country` | SDK 选择 | 必须使用指定的受支持国家，不静默替换 |
+| `--channel` | SDK 默认渠道 | 指定已有渠道，不再发现或创建默认渠道 |
+| `NSTDATA_API_TOKEN` | 无 | Proxy API Key，不作为命令行参数传入 |
+| `NSTDATA_TEAM_ID` | 账号上下文 | 按需明确团队上下文 |
+| `NSTDATA_API_BASE_URL` | 官方 API | 高级地址覆盖，普通使用无需设置 |
+
+配置或出号失败时停止，不进入目标检测。创建和出号不自动重试。`CHANNEL_CREATION_UNCERTAIN` 或 `PROXY_GENERATION_UNCERTAIN` 表示远端可能已执行，先在账号中核对结果再决定后续操作。取消本地等待不会撤销远端操作。多机器需要严格共用渠道时使用 `--channel`；多个进程同时首次使用可能各自创建默认渠道。
+
+HTTP 状态和 `elapsedMs` 仍仅描述目标请求，不含账号初始化。JSON／CSV 不包含 Key、生成的连接或渠道 ID。可选 IP 探测／查询的含义不变。账号初始化可能执行多次有界 API 请求；`--timeout` 限制每次 API 或代理请求，不是整个命令的总期限。
 
 ## 命令行与批量检查
+
+下方 `npx --no-install` 示例要求当前项目已安装该包。临时使用且不添加项目依赖时，请使用[独立 CLI 命令](../README_zh.md#安装)。
 
 ### 输入与输出
 
@@ -26,8 +53,8 @@ npx --no-install nstdata-proxy-checker \
 
 | 选项／环境变量 | 默认值 | 用途与限制 |
 |---|---|---|
-| `--target` / `NSTDATA_PROXY_CHECK_URL` | 必填其一 | 目标 HTTP(S) URL，不含用户名密码；命令行优先 |
-| `NSTDATA_PROXY_URL` | 无 | 未设置 `--file` 时的代理连接 |
+| `--target` / `NSTDATA_PROXY_CHECK_URL` | 必填其一；Nstdata 模式默认 `https://example.com/` | 目标 HTTP(S) URL，不含用户名密码；命令行优先 |
+| `NSTDATA_PROXY_URL` | 无 | 未使用 `--file` 或 `--nstdata` 时的代理连接 |
 | `--file` | 无 | 受保护的代理 JSON 数组文件 |
 | `--timeout` | 20000 ms | 单次探测期限，整数 1–600000 |
 | `--concurrency` | 1 | 并发数，整数 1–4 |
@@ -44,7 +71,7 @@ JSON 返回 `total/succeeded/failed/results`，结果保持输入顺序。CSV �
 | 退出码 | 含义 |
 |---|---|
 | 0 | 所有目标检测通过；额外探测／详细查询失败单独记录，不改变此退出码 |
-| 1 | 至少一条失败，包括文件输入中的无效代理和 CA 加载失败 |
+| 1 | 初始化失败或至少一条检测失败，包括文件中的无效代理和 CA 加载失败 |
 | 2 | 调用被拒绝，例如文件格式或公共参数错误 |
 | 130 | SIGINT／SIGTERM 中断，停止在途及排队任务 |
 
@@ -212,6 +239,8 @@ CLI `--ip-info` 用于已另行提供 `@nstdata-ai/ip-lookup` 的扩展安装。
 查询只在取得有效观测 IP 后执行，否则返回 `IP_NOT_OBSERVED`；不向查询函数传递代理凭据。查询服务访问和数据使用授权需要另行具备。查询失败不改变目标检测结论，也不添加重试或回退。
 
 ## 错误与排查
+
+CLI 的输入错误写入标准错误，包含 `error.code` 和说明具体配置项的 `error.message`，退出码为 2。例如未设置代理时，消息会指出 `NSTDATA_PROXY_URL` 缺失，并提示设置代理或使用 `--file`。它读取当前进程的环境变量，不自动加载其他项目或文件中的配置；检测结果行中的 `error.code` 含义如下。
 
 | 错误码 | 含义／下一步 |
 |---|---|

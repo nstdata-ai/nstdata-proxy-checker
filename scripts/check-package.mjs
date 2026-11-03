@@ -9,6 +9,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { packageRegistry } from './package-registry.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const temp = mkdtempSync(join(tmpdir(), 'nstdata-checker-package-'));
@@ -23,26 +24,42 @@ Object.assign(cleanEnvironment, { npm_config_userconfig: join(temp, 'user.npmrc'
     npm_config_fund: 'false', npm_config_fetch_retries: '0', npm_config_update_notifier: 'false' });
 const npm = (args, cwd) => execFileSync(process.execPath, [process.env.npm_execpath, ...args], { cwd, env: cleanEnvironment, encoding: 'utf8', timeout: 30000 });
 const readJSON = path => JSON.parse(readFileSync(path, 'utf8'));
+let registry;
 try {
     const manifest = readJSON(join(root, 'package.json'));
-    assert.deepEqual(manifest.dependencies ?? {}, {});
+    assert.deepEqual(manifest.dependencies, { '@nstdata-ai/proxy': '^1.1.0' });
     const lock = readJSON(join(root, 'package-lock.json'));
     assert.equal(lock.lockfileVersion, 3);
     assert.equal(lock.version, manifest.version);
     assert.equal(lock.packages[''].version, manifest.version);
     assert.deepEqual(lock.packages[''].devDependencies, manifest.devDependencies);
-    assert.deepEqual(lock.packages[''].dependencies ?? {}, {});
+    assert.deepEqual(lock.packages[''].dependencies, manifest.dependencies);
     assert.deepEqual(manifest.peerDependencies, { '@nstdata-ai/ip-lookup': '^1.0.0' });
     assert.deepEqual(manifest.peerDependenciesMeta, { '@nstdata-ai/ip-lookup': { optional: true } });
     assert.deepEqual(lock.packages[''].peerDependencies, manifest.peerDependencies);
     assert.deepEqual(lock.packages[''].peerDependenciesMeta, manifest.peerDependenciesMeta);
     for (const [name, entry] of Object.entries(lock.packages)) if (name) {
-        assert.equal(entry.dev, true, 'No runtime dependency is required');
+        assert.equal(entry.dev === true, name !== 'node_modules/@nstdata-ai/proxy');
         assert.ok(entry.resolved.startsWith('https://registry.npmjs.org/') && /^sha512-[A-Za-z0-9+/]+={0,2}$/.test(entry.integrity));
     }
     assert.doesNotMatch(JSON.stringify(lock), /file:|_planning|\/Users\//);
+    const sdkRoot = fileURLToPath(new URL('../', import.meta.resolve('@nstdata-ai/proxy')));
+    const sdkManifest = readJSON(join(sdkRoot, 'package.json'));
+    assert.equal(sdkManifest.version, lock.packages['node_modules/@nstdata-ai/proxy'].version);
+    const [sdkPack] = JSON.parse(npm(['pack', '--json', '--ignore-scripts', '--pack-destination', temp], sdkRoot));
+    assert.equal(sdkPack.integrity, lock.packages['node_modules/@nstdata-ai/proxy'].integrity);
+    const sdkPackage = { manifest: sdkManifest, archive: join(temp, sdkPack.filename), filename: 'proxy.tgz' };
+    registry = await packageRegistry([sdkPackage]);
     for (const file of ['README.md', 'README_zh.md']) {
-        assert.deepEqual(shellCommands(readFileSync(join(root, file), 'utf8'))[0], ['npm', 'install', manifest.name]);
+        const commands = shellCommands(readFileSync(join(root, file), 'utf8'));
+        assert.deepEqual(commands[0], ['npm', 'install', '--global', manifest.name]);
+        assert.deepEqual(commands[1], ['export', 'NSTDATA_PROXY_URL=http://user:password@proxy.example:8080']);
+        assert.ok(commands.some(command => command.join(' ') === `npm install ${manifest.name}`));
+        assert.ok(commands.some(command => command.join(' ') ===
+            `npx --yes --package=${manifest.name} nstdata-proxy-checker --help`));
+        assert.ok(commands.some(command => command.join(' ') ===
+            'nstdata-proxy-checker --nstdata --env .env --yes'));
+        assert.match(readFileSync(join(root, file), 'utf8'), /```dotenv\nNSTDATA_API_TOKEN=your-api-key\n```/);
     }
     assert.ok(readFileSync(join(root, 'CHANGELOG.md'), 'utf8').split('\n').includes(`## ${manifest.version}`));
     let pack, archive;
@@ -88,16 +105,18 @@ try {
     const commands = ['README.md', 'README_zh.md'].map(name => [...readFileSync(join(root, name), 'utf8').matchAll(/```sh\n([\s\S]*?)```/g)].map(x => x[1].trim()).join('\n'));
     assert.equal(commands[0], commands[1]);
     writeFileSync(join(temp, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
-    npm(['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', archive], temp);
+    await promisify(execFile)(process.execPath, [process.env.npm_execpath, 'install', '--ignore-scripts', '--no-audit', '--no-fund', archive],
+        { cwd: temp, env: { ...cleanEnvironment, npm_config_offline: 'false', npm_config_registry: registry.url }, timeout: 30000 });
     const installedLock = readJSON(join(temp, 'node_modules/.package-lock.json'));
-    assert.deepEqual(Object.keys(installedLock.packages), ['node_modules/@nstdata-ai/proxy-checker']);
+    assert.deepEqual(Object.keys(installedLock.packages).sort(), ['node_modules/@nstdata-ai/proxy', 'node_modules/@nstdata-ai/proxy-checker']);
+    assert.equal(installedLock.packages['node_modules/@nstdata-ai/proxy'].integrity, sdkPack.integrity);
     const installed = join(temp, 'node_modules/@nstdata-ai/proxy-checker');
     assert.equal(readJSON(join(installed, 'package.json')).version, manifest.version);
     execFileSync(process.execPath, ['--input-type=module', '-e', "import {checkProxy,checkProxies} from '@nstdata-ai/proxy-checker'; import {createProxyTransport} from '@nstdata-ai/proxy-checker/transport'; if([checkProxy,checkProxies,createProxyTransport].some(x=>typeof x!=='function'))process.exit(1);"], { cwd: temp, timeout: 10000 });
     writeFileSync(join(temp, 'check.mts'), readFileSync(join(root, 'test/types.ts')));
     execFileSync(process.execPath, [join(root, 'node_modules/typescript/bin/tsc'), '--noEmit', '--strict', '--module', 'NodeNext', '--target', 'ES2022', '--types', 'node', '--typeRoots', join(root, 'node_modules/@types'), 'check.mts'], { cwd: temp, timeout: 30000 });
     execFileSync(process.execPath, [join(temp, 'node_modules/.bin/nstdata-proxy-checker'), '--help'], { cwd: temp, timeout: 10000 });
-    execFileSync(process.execPath, ['--test', join(root, 'test/checker.test.mjs'), join(root, 'test/transport.test.mjs'), join(root, 'test/ip.test.mjs')], { cwd: temp,
+    execFileSync(process.execPath, ['--test', ...['checker', 'transport', 'ip', 'nstdata-cli'].map(name => join(root, 'test/' + name + '.test.mjs'))], { cwd: temp,
         env: { ...cleanEnvironment, NSTDATA_CHECKER_ROOT: installed }, timeout: 30000, stdio: 'inherit' });
     // The optional peer is supplied by the consumer; use a synthetic adapter for CLI and guide checks.
     const peer = join(temp, 'lookup-fixture'); mkdirSync(peer);
@@ -179,6 +198,8 @@ net.Socket.prototype.connect = function (...args) {
         assert.match(cli.stdout, /separate-probe,203\.0\.113\.7,,,\x27=Example/);
         assert.equal(cli.stderr, '');
     } finally { await new Promise(resolve => gateway.close(resolve)); }
-    const cliCases = await checkDocumentedCommands({ root, temp, archive, manifest, files: required, environment: documentEnvironment });
-    console.log(`PASS: ${pack.name}@${pack.version}; ${required.length}-file allowlist; standalone offline install with no required runtime dependencies; public root/transport types and installed CLI/loopback/TLS tests; bilingual guide programs and packaged links; isolated default registry installation and ${cliCases} documented CLI cases`);
-} finally { rmSync(temp, { recursive: true, force: true }); }
+    const cliCases = await checkDocumentedCommands({ root, temp, archive, manifest, sdkPackage, files: required, environment: documentEnvironment });
+    assert.ok(registry.requests.every(row => row.method === 'GET' && !row.authorization &&
+        ['/@nstdata-ai/proxy', '/proxy.tgz', '/@nstdata-ai/ip-lookup'].includes(row.pathname)));
+    console.log(`PASS: ${pack.name}@${pack.version}; ${required.length}-file allowlist; exact Proxy SDK dependency; public root/transport types and installed CLI/loopback/TLS tests; bilingual guide programs and packaged links; isolated default registry installation and ${cliCases} documented CLI cases`);
+} finally { await registry?.close(); rmSync(temp, { recursive: true, force: true }); }

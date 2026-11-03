@@ -139,6 +139,46 @@ test('CLI help/missing inputs do not need a Crawl key or server process', async 
     assert.equal(JSON.parse(invalid.stderr).error.code, 'INVALID_CONFIG');
 });
 
+test('CLI help separates setup, options and runnable examples', async () => {
+    const result = await cli(['--help']);
+    assert.equal(result.code, 0);
+    assert.equal(result.stderr, '');
+    for (const section of ['Usage:', 'Setup:', 'Options:', 'Examples:']) assert.ok(result.stdout.includes(section));
+    assert.match(result.stdout, /NSTDATA_PROXY_URL/);
+    assert.match(result.stdout, /HTTP\/HTTPS proxy/);
+    assert.ok(result.stdout.split('\n').every(line => line.length <= 100));
+});
+
+test('CLI identifies invalid inputs with actionable messages and never prints their values', async t => {
+    const proxy = await gateway(t);
+    const target = ['--target', targetURL];
+    const secret = 'private-cli-value';
+    const cases = [
+        { args: target, env: {}, message: /NSTDATA_PROXY_URL.*not set/ },
+        { args: target, env: { NSTDATA_PROXY_URL: ' ' }, message: /NSTDATA_PROXY_URL.*not set/ },
+        { args: target, env: { NSTDATA_PROXY_URL: `socks5://${secret}@127.0.0.1:1` }, message: /NSTDATA_PROXY_URL.*HTTP\/HTTPS/ },
+        { args: [], message: /--target.*NSTDATA_PROXY_CHECK_URL/ },
+        { args: ['--target', `https://${secret}@fixture.invalid/`], message: /--target.*HTTP\/HTTPS/ },
+        { args: [...target, '--timeout', secret], message: /--timeout.*1.*600000/ },
+        { args: [...target, '--timeout', '0'], message: /--timeout.*1.*600000/ },
+        { args: [...target, '--concurrency', '5'], message: /--concurrency.*1.*4/ },
+        { args: [...target, '--format', secret], message: /--format.*json.*csv/ },
+        { args: [...target, '--expected-text', ''], message: /--expected-text.*non-empty/ },
+        { args: [...target, '--ip-probe', `https://${secret}@fixture.invalid/`], message: /--ip-probe.*HTTP\/HTTPS/ },
+        { args: target, env: { NSTDATA_PROXY_URL: proxy.url, NSTDATA_PROXY_CA_FILE: secret }, message: /NSTDATA_PROXY_CA_FILE.*absolute/ },
+        { args: [...target, `--${secret}`], message: /command-line arguments.*--help/ },
+        { args: [...target, '--file', `/missing/${secret}.json`], message: /--file.*readable/ },
+    ];
+    for (const entry of cases) {
+        const result = await cli(entry.args, entry.env ?? { NSTDATA_PROXY_URL: proxy.url });
+        assert.equal(result.code, 2);
+        assert.equal(result.stdout, '');
+        assert.match(JSON.parse(result.stderr).error.message, entry.message);
+        assert.doesNotMatch(result.stderr, new RegExp(secret));
+    }
+    assert.equal(proxy.rows.length, 0);
+});
+
 test('CLI rejects an explicit empty file path without using the environment proxy', async t => {
     const proxy = await gateway(t);
     const env = { NSTDATA_PROXY_URL: proxy.url };
