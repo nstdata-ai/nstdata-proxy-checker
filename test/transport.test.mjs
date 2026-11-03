@@ -59,6 +59,21 @@ test('HTTP/HTTPS gateways verify target and gateway TLS, and isolate authenticat
     assert.equal(received.length, 2);
 });
 
+test('HTTPS default and explicit ports retain the exact target Host after CONNECT', async t => {
+    const material = tlsMaterial(t), received = [];
+    const port = await listen(t, https.createServer(material, (req, res) => {
+        received.push({ host: req.headers.host, path: req.url }); res.end('trusted');
+    }));
+    const proxy = await proxyFixture(t, { destinationPort: port });
+    const transport = createProxyTransport({ proxyURL: proxy.url, caFile: material.certFile });
+    for (const authority of ['localhost', 'localhost:8443']) {
+        const response = await transport.request({ url: `https://${authority}/path?q=1` });
+        assert.equal(response.statusCode, 200);
+        assert.deepEqual(received.at(-1), { host: authority, path: '/path?q=1' });
+    }
+    assert.deepEqual(proxy.connections.map(row => row.authority), ['localhost:443', 'localhost:8443']);
+});
+
 test('cancellation and deadline stop pending CONNECT; errors contain no credentials', async t => {
     let connecting;
     const started = new Promise(resolve => { connecting = resolve; });
