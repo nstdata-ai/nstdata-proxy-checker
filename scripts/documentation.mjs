@@ -5,9 +5,9 @@ function literalWords(line) {
     const words = [];
     let remaining = line.trim();
     while (remaining) {
-        const token = /^(?:"([^"\\$`\r\n]*)"|'([^'\r\n]*)'|([^\s"'\\$`;&|<>]+))(?=\s|$)/.exec(remaining);
+        const token = /^(?:([A-Z_][A-Z0-9_]*=)?(?:"([^"\\$`\r\n]*)"|'([^'\r\n]*)')|([^\s"'\\$`;&|<>]+))(?=\s|$)/.exec(remaining);
         assert.ok(token, 'Documentation commands must use literal arguments without shell expansion or operators');
-        words.push(token[1] ?? token[2] ?? token[3]);
+        words.push((token[1] ?? '') + (token[2] ?? token[3] ?? token[4]));
         remaining = remaining.slice(token[0].length).trimStart();
     }
     assert.ok(words.length, 'Empty documentation command');
@@ -29,7 +29,7 @@ export function shellCommands(text) {
             if (continued) assert.match(line, /\s\\$/, 'Line continuation must follow a complete argument');
             words.push(...literalWords(continued ? line.trimEnd().slice(0, -1) : line));
             if (continued) continue;
-            assert.ok(['npm', 'npx', 'node'].includes(words[0]), 'Unsupported documentation executable');
+            assert.ok(['npm', 'npx', 'node', 'export', 'nstdata-proxy-checker'].includes(words[0]), 'Unsupported documentation executable');
             commands.push(words);
             words = [];
         }

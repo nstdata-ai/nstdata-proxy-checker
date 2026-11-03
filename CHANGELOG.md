@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+
+- Add explicit Nstdata CLI mode: obtain one HTTP proxy using an API key and available balance, then check one target.
+- Support hidden key input, setup confirmation, explicit env files and country/channel selection.
+- Reuse Proxy SDK default-channel handling, cancellation and uncertain-operation safeguards.
+- Add the Proxy SDK as a runtime dependency; ordinary checks never call account APIs.
+- Preserve the HTTPS target Host header when using a custom CONNECT/TLS connection.
+
+- Explain proxy setup and all command-line options in multiline CLI help.
+- Include actionable, redacted messages for invalid CLI configuration and input files.
+- Document global CLI installation and test the complete setup sequence from an empty environment.
+
 ## 1.1.0
 
 - Provide an independent HTTP/HTTPS proxy checker as a CLI and Node.js library, with no required runtime dependencies.

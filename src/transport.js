@@ -129,6 +129,8 @@ async function requestThroughProxy(proxyURL, input, signal, maxBytes, ca) {
             if (tunnel) {
                 endpoint = target;
                 client = https;
+                // A custom TLS connection must not replace the target's HTTP authority.
+                requestOptions.headers.Host = target.host;
                 const socket = tunnel;
                 const hostname = target.hostname.replace(/^\[|\]$/g, '');
                 requestOptions.createConnection = () => connectTLS({ socket, host: hostname, ca, rejectUnauthorized: true, servername: isIP(hostname) ? undefined : hostname });

@@ -124,7 +124,7 @@ test('published registry checks tolerate delayed visibility without retrying a p
     }
 });
 
-test('publish CLI uses one checked archive without retries and preserves safe failure diagnostics', () => {
+test('publish CLI publishes once and verifies default installations within bounds', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nstdata-release-cli-'));
     try {
         const current = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -146,19 +146,31 @@ test('publish CLI uses one checked archive without retries and preserves safe fa
                 console.error('npm error code E403\\nfixture-secret-must-not-appear');process.exit(1);
             }
             if(args[0]==='install') {
+                if(process.env.RELEASE_TEST_INSTALL_MODE==='failure') {
+                    console.error('npm error code E503\\nfixture-secret-must-not-appear');process.exit(1);
+                }
+                const installs=fs.readFileSync(process.env.RELEASE_TEST_LOG,'utf8').trim().split('\\n')
+                    .map(line=>JSON.parse(line)).filter(command=>command[0]==='install').length;
+                const mode=process.env.RELEASE_TEST_INSTALL_MODE;
+                const version=mode==='stale'||(mode==='converging'&&installs<3)?'1.1.0':mode==='unexpected'?'2.0.0':mode==='malformed'?'invalid':'${manifest.version}';
                 const folder=path.join(process.cwd(),'node_modules/@nstdata-ai/proxy-checker');fs.mkdirSync(folder,{recursive:true});
-                fs.writeFileSync(path.join(folder,'package.json'),JSON.stringify({name:'${manifest.name}',version:process.env.RELEASE_TEST_STALE_LATEST==='1'?'1.0.1':'${manifest.version}',type:'module',exports:{'.':'./index.js','./transport':'./transport.js'}}));
+                fs.writeFileSync(path.join(folder,'package.json'),JSON.stringify({name:'${manifest.name}',version,type:'module',exports:{'.':'./index.js','./transport':'./transport.js'}}));
+                fs.writeFileSync(path.join(process.cwd(),'package-lock.json'),JSON.stringify({packages:{'node_modules/@nstdata-ai/proxy-checker':{integrity:mode==='integrity'?'sha512-different':'${manifest.integrity}'}}}));
                 fs.writeFileSync(path.join(folder,'index.js'),'export function checkProxy(){};export function checkProxies(){};');
                 fs.writeFileSync(path.join(folder,'transport.js'),'export function createProxyTransport(){};');
                 const bin=path.join(process.cwd(),'node_modules/.bin');fs.mkdirSync(bin,{recursive:true});
                 fs.writeFileSync(path.join(bin,'nstdata-proxy-checker'),'console.log(\"Usage: nstdata-proxy-checker\");');
+                fs.appendFileSync(process.env.RELEASE_TEST_LOG+'.installs',JSON.stringify({cwd:process.cwd(),cache:args[args.indexOf('--cache')+1]})+'\\n');
             }
         `, { mode: 0o755 });
         const preload = path.join(directory, 'network.cjs');
         fs.writeFileSync(preload, `
             const fs=require('node:fs');
             let registryReads=0;
-            require('node:timers/promises').setTimeout=async ms=>{if(ms!==30000) throw new Error('Unexpected delay');};
+            require('node:timers/promises').setTimeout=async ms=>{
+                if(ms!==30000) throw new Error('Unexpected delay');
+                fs.appendFileSync(process.env.RELEASE_TEST_LOG+'.delays',ms+'\\n');
+            };
             require('node:module').syncBuiltinESMExports();
             globalThis.fetch=async url=>{
                 let data,status=200;
@@ -171,26 +183,47 @@ test('publish CLI uses one checked archive without retries and preserves safe fa
                 return {status,json:async()=>data};
             };
         `);
-        for (const [failure, staleLatest, delayed] of [[false, false, false], [true, false, false], [false, true, false], [false, false, true]]) {
+        for (const [failure, installMode, delayed] of [[false, 'current', false], [true, 'current', false],
+            [false, 'converging', false], [false, 'stale', false], [false, 'current', true],
+            [false, 'failure', false], [false, 'unexpected', false], [false, 'malformed', false], [false, 'integrity', false]]) {
             fs.rmSync(log, { force: true });
+            fs.rmSync(log + '.installs', { force: true });
+            fs.rmSync(log + '.delays', { force: true });
+            fs.rmSync(path.join(directory, 'summary.md'), { force: true });
             const result = spawnSync(process.execPath, ['--require', preload, path.resolve(__dirname, '../scripts/release.mjs'), 'publish', directory], {
                 env: { ...process.env, ...env, RELEASE_VERSION: manifest.version, PATH: `${bin}${path.delimiter}${process.env.PATH}`, NODE_AUTH_TOKEN: '', NPM_TOKEN: '',
                     RELEASE_MANIFEST_SHA256: hash(text), RELEASE_TEST_LOG: log, RELEASE_TEST_FAIL: failure ? '1' : '0',
-                    RELEASE_TEST_STALE_LATEST: staleLatest ? '1' : '0', RELEASE_TEST_DELAYED: delayed ? '1' : '0', GITHUB_STEP_SUMMARY: path.join(directory, 'summary.md') },
+                    RELEASE_TEST_INSTALL_MODE: installMode, RELEASE_TEST_DELAYED: delayed ? '1' : '0', GITHUB_STEP_SUMMARY: path.join(directory, 'summary.md') },
                 encoding: 'utf8', timeout: 15000,
             });
-            assert.equal(result.status, failure || staleLatest ? 1 : 0, result.stderr);
+            const shouldFail = failure || ['stale', 'failure', 'unexpected', 'malformed', 'integrity'].includes(installMode);
+            assert.equal(result.status, shouldFail ? 1 : 0, `${installMode}: ${result.stderr}`);
+            assert.equal(fs.existsSync(path.join(directory, 'summary.md')), !shouldFail, 'Only a verified installation may produce the publication success summary');
             const commands = fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
             assert.deepEqual(commands[0], ['publish', path.join(directory, manifest.filename), '--access', 'public', '--registry',
                 'https://registry.npmjs.org', '--ignore-scripts', '--provenance', '--tag', 'latest', '--fetch-retries=0']);
             assert.equal(commands.filter(args => args[0] === 'publish').length, 1);
-            assert.equal(commands.length, failure ? 1 : 2);
+            const installs = failure ? 0 : installMode === 'converging' ? 3 : installMode === 'stale' ? 7 : 1;
+            assert.equal(commands.length, 1 + installs);
             if (!failure) assert.equal(commands[1][1], current.name, 'Verify the documented default npm install, not only a pinned version');
             if (failure) {
                 assert.match(result.stderr, /npm publish failed \(exit 1, E403\)/);
                 assert.ok(!result.stderr.includes('fixture-secret-must-not-appear'));
             }
-            if (staleLatest) assert.match(result.stderr, /1\.0\.1/);
+            if (installMode === 'stale') assert.match(result.stderr, /older version after bounded checks/);
+            if (installMode === 'failure') {
+                assert.match(result.stderr, /npm install failed \(exit 1, E503\)/);
+                assert.doesNotMatch(result.stderr, /fixture-secret-must-not-appear/);
+            }
+            if (['unexpected', 'malformed'].includes(installMode)) assert.match(result.stderr, /Unexpected default installation version/);
+            if (installMode === 'integrity') assert.match(result.stderr, /Installed archive integrity differs/);
+            const delays = fs.existsSync(log + '.delays') ? fs.readFileSync(log + '.delays', 'utf8').trim().split('\n').map(Number) : [];
+            assert.deepEqual(delays, Array((delayed ? 2 : 0) + (installMode === 'converging' ? 2 : installMode === 'stale' ? 6 : 0)).fill(30000));
+            if (installs > 1) {
+                const paths = fs.readFileSync(log + '.installs', 'utf8').trim().split('\n').map(line => JSON.parse(line));
+                assert.equal(new Set(paths.map(entry => entry.cwd)).size, installs, 'Each installation must use a fresh project');
+                assert.equal(new Set(paths.map(entry => entry.cache)).size, installs, 'Each installation must use a fresh cache');
+            }
         }
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

@@ -13,12 +13,17 @@ test('documentation commands preserve literal quoted arguments and command bound
     assert.deepEqual(shellCommands("```sh\nnpx --no-install nstdata-proxy-checker --expected-text 'Example Domain'\n```"), [
         ['npx', '--no-install', 'nstdata-proxy-checker', '--expected-text', 'Example Domain'],
     ]);
+    assert.deepEqual(shellCommands("```sh\nexport NSTDATA_PROXY_URL='http://user:p%40ss@proxy.example:8080'\nnstdata-proxy-checker --target https://example.com/\n```"), [
+        ['export', 'NSTDATA_PROXY_URL=http://user:p%40ss@proxy.example:8080'],
+        ['nstdata-proxy-checker', '--target', 'https://example.com/'],
+    ]);
 });
 
 test('documentation commands reject unsupported syntax rather than skipping it', () => {
     for (const line of ['npm install $(command)', 'npm install `command`', 'npm install "${TOKEN}"',
         'npm install "unfinished', 'npm install a; command', 'npm install a && command', 'npm install a | command',
-        'npm install a > output', 'npm install a\\ b', 'curl https://example.com/']) {
+        'npm install a > output', 'npm install a\\ b', 'curl https://example.com/',
+        'export NSTDATA_PROXY_URL="${TOKEN}"', 'export NSTDATA_PROXY_URL=$(command)']) {
         assert.throws(() => shellCommands('```sh\n' + line + '\n```'));
     }
 });

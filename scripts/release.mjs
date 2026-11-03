@@ -143,11 +143,31 @@ async function main(mode, directory, env = process.env) {
         await checkRegistry(manifest.version, manifest.integrity);
         const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'nstdata-public-install-'));
         try {
-            fs.writeFileSync(path.join(temp, 'package.json'), '{"private":true}');
-            npm(['install', name, '--registry', registry, '--ignore-scripts', '--no-audit', '--no-fund', '--cache', path.join(temp, 'cache')], temp);
-            assert.equal(readJson(path.join(temp, 'node_modules', name, 'package.json')).version, manifest.version);
-            execFileSync(process.execPath, ['--input-type=module', '-e', `import assert from 'node:assert/strict';import {checkProxy,checkProxies} from '${name}';import {createProxyTransport} from '${name}/transport';for(const fn of [checkProxy,checkProxies,createProxyTransport])assert.equal(typeof fn,'function');`], { cwd: temp, timeout: 10000 });
-            execFileSync(process.execPath, [path.join(temp, 'node_modules/.bin/nstdata-proxy-checker'), '--help'], { cwd: temp, timeout: 10000 });
+            let installedDirectory;
+            for (let attempt = 0; attempt < 7; attempt++) {
+                const directory = path.join(temp, String(attempt));
+                fs.mkdirSync(directory);
+                fs.writeFileSync(path.join(directory, 'package.json'), '{"private":true}');
+                npm(['install', name, '--registry', registry, '--ignore-scripts', '--no-audit', '--no-fund', '--cache', path.join(directory, 'cache')], directory);
+                const installed = readJson(path.join(directory, 'node_modules', name, 'package.json'));
+                assert.equal(installed.name, name, 'Unexpected installed package');
+                if (installed.version === manifest.version) {
+                    const lock = readJson(path.join(directory, 'package-lock.json'));
+                    assert.equal(lock.packages?.[`node_modules/${name}`]?.integrity, manifest.integrity, 'Installed archive integrity differs');
+                    installedDirectory = directory;
+                    break;
+                }
+                assert.match(installed.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, 'Unexpected default installation version');
+                const actual = installed.version.split('.').map(Number);
+                const expected = manifest.version.split('.').map(Number);
+                const difference = actual.findIndex((value, index) => value !== expected[index]);
+                assert.ok(difference >= 0 && actual[difference] < expected[difference], 'Unexpected default installation version');
+                assert.ok(attempt < 6, 'Default npm installation still resolves an older version after bounded checks; inspect registry before another dispatch');
+                console.log('Default npm installation still resolves an older version; waiting before a fresh installation check.');
+                await delay(30000);
+            }
+            execFileSync(process.execPath, ['--input-type=module', '-e', `import assert from 'node:assert/strict';import {checkProxy,checkProxies} from '${name}';import {createProxyTransport} from '${name}/transport';for(const fn of [checkProxy,checkProxies,createProxyTransport])assert.equal(typeof fn,'function');`], { cwd: installedDirectory, timeout: 10000 });
+            execFileSync(process.execPath, [path.join(installedDirectory, 'node_modules/.bin/nstdata-proxy-checker'), '--help'], { cwd: installedDirectory, timeout: 10000 });
         } finally { fs.rmSync(temp, { recursive: true, force: true }); }
         fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `\nPublished \`${name}@${manifest.version}\`; registry integrity and clean public installation passed.\n`);
     }
