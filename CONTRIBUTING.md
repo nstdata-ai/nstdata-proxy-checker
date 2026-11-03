@@ -39,8 +39,6 @@ npm install /path/to/nstdata-ip-lookup/nstdata-ai-ip-lookup-1.0.0.tgz
 
 The `Publish npm` workflow is started manually from `main`, with a stable version matching `package.json` and the full commit SHA. It checks the source, builds one archive, and records its integrity. The `npm-production` environment reviewer approves publication of that same archive. Successful publication must pass public integrity and default-install checks.
 
-For an existing npm package, configure [trusted publishing](https://docs.npmjs.com/trusted-publishers/) for this repository, `release.yml` and `npm-production`, permitting `npm publish`. The environment must require a reviewer, allow only the `main` branch and disable administrator bypass. No npm token is needed. Configure a new binding near the next release so its first-use deadline is met.
-
-A new package must exist before trusted publishing can be configured. For its first release, the scope owner publishes the reviewed archive using their own npm login and two-factor authentication, following [npm's public scoped-package instructions](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/). Use trusted publishing for subsequent versions. The workflow refuses to bootstrap an unpublished package.
+Configure [trusted publishing](https://docs.npmjs.com/trusted-publishers/) for this repository, `release.yml` and `npm-production`, permitting `npm publish`. The environment must require a reviewer, allow only the `main` branch and disable administrator bypass. No npm token is needed. Configure a new binding near the next release so its first-use deadline is met.
 
 If publication fails or the outcome is uncertain, inspect the registry version and integrity before taking further action. Do not retry publication blindly or change a published version's contents.
