@@ -37,7 +37,7 @@ npm install /path/to/nstdata-ip-lookup/nstdata-ai-ip-lookup-1.0.0.tgz
 
 ## Releases
 
-The `Publish npm` workflow is started manually from `main`, with a stable version matching `package.json` and the full commit SHA. It checks the source, builds one archive, and records its integrity. The `npm-production` environment reviewer approves publication of that same archive. Successful publication must pass public integrity and default-install checks.
+The `Publish npm` workflow is started manually from `main`, with a stable version matching `package.json` and the full commit SHA. It checks the source, builds one archive, and records its integrity. The `npm-production` environment reviewer approves publication of that same archive. The workflow finishes when `npm publish` succeeds. Public availability may be delayed; registry integrity and clean installation are checked separately.
 
 Configure [trusted publishing](https://docs.npmjs.com/trusted-publishers/) for this repository, `release.yml` and `npm-production`, permitting `npm publish`. The environment must require a reviewer, allow only the `main` branch and disable administrator bypass. No npm token is needed. Configure a new binding near the next release so its first-use deadline is met.
 

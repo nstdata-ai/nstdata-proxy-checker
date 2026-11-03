@@ -81,50 +81,29 @@ test('release artifact binds the checked bytes to the workflow commit, version a
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('registry checks distinguish an absent version from errors and require exact published integrity', async () => {
-    const published = { name: pkg.name, version: pkg.version, dist: { integrity: 'sha512-fixture' } };
-    await checkRegistry(pkg.version, undefined, async (url, options) => {
+test('registry preflight requires one 404 and rejects existing versions or request failures', async () => {
+    let reads = 0;
+    await checkRegistry(pkg.version, async (url, options) => {
+        reads++;
         assert.equal(url, 'https://registry.npmjs.org/%40nstdata-ai%2Fproxy-checker/1.1.0');
         assert.deepEqual(options.headers, {});
         return response({}, 404);
     });
-    await assert.rejects(checkRegistry(pkg.version, undefined, async () => response(published)), /already exists/);
-    await checkRegistry(pkg.version, published.dist.integrity, async () => response(published));
-    await assert.rejects(checkRegistry(pkg.version, 'wrong', async () => response(published)), /integrity differs/);
-    await assert.rejects(checkRegistry(pkg.version, published.dist.integrity, async () => response({}, 404), async () => {}), /not visible/);
-    for (const status of [401, 403, 429, 500]) {
-        let calls = 0;
-        await assert.rejects(checkRegistry(pkg.version, undefined, async () => { calls++; return response({}, status); }));
-        assert.equal(calls, 1);
-    }
-    await assert.rejects(request('https://fixture.invalid', undefined, async () => { throw new Error('network unavailable'); }));
-    await assert.rejects(request('https://fixture.invalid', undefined, async () => ({ status: 200, json: async () => { throw new Error('invalid JSON'); } })));
-});
-
-test('published registry checks tolerate delayed visibility without retrying a publication', async () => {
-    const published = { name: pkg.name, version: pkg.version, dist: { integrity: 'sha512-fixture' } };
-    let reads = 0;
-    const delays = [];
-    await checkRegistry(pkg.version, published.dist.integrity,
-        async () => ++reads < 7 ? response({}, 404) : response(published),
-        async milliseconds => { delays.push(milliseconds); });
-    assert.equal(reads, 7);
-    assert.deepEqual(delays, Array(6).fill(30000));
-    reads = 0;
-    await assert.rejects(checkRegistry(pkg.version, published.dist.integrity,
-        async () => { reads++; return response({}, 404); }, async () => {}), /not visible after bounded checks/);
-    assert.equal(reads, 7);
-    for (const result of [response({ ...published, dist: { integrity: 'different' } }),
-        response({ ...published, name: 'different' }), response({ ...published, version: '1.1.1' }),
-        ...[401, 403, 429, 500].map(status => response({}, status))]) {
+    assert.equal(reads, 1);
+    for (const status of [200, 401, 403, 429, 500]) {
         reads = 0;
-        await assert.rejects(checkRegistry(pkg.version, published.dist.integrity,
-            async () => { reads++; return result; }, async () => assert.fail('Unexpected retry')));
+        await assert.rejects(checkRegistry(pkg.version, async () => {
+            reads++;
+            return response({}, status);
+        }));
         assert.equal(reads, 1);
     }
+    await assert.rejects(checkRegistry(pkg.version, async () => { throw new Error('network unavailable'); }));
+    await assert.rejects(request('https://fixture.invalid', undefined,
+        async () => ({ status: 200, json: async () => { throw new Error('invalid JSON'); } })));
 });
 
-test('publish CLI publishes once and verifies default installations within bounds', () => {
+test('publish CLI completes on npm acceptance without polling or installation and never retries', () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'nstdata-release-cli-'));
     try {
         const current = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -132,102 +111,78 @@ test('publish CLI publishes once and verifies default installations within bound
         const manifest = { name: current.name, version: current.version, commit, filename: `nstdata-ai-proxy-checker-${current.version}.tgz`,
             sha256: hash(bytes), integrity: `sha512-${hash(bytes, 'sha512', 'base64')}` };
         const text = JSON.stringify(manifest);
+        const archive = path.join(directory, manifest.filename);
         fs.writeFileSync(path.join(directory, 'manifest.json'), text);
-        fs.writeFileSync(path.join(directory, manifest.filename), bytes);
         const log = path.join(directory, 'commands.jsonl');
+        const requests = path.join(directory, 'requests.jsonl');
+        const summary = path.join(directory, 'summary.md');
         const bin = path.join(directory, 'bin');
         fs.mkdirSync(bin);
         fs.writeFileSync(path.join(bin, 'git'), `#!${process.execPath}\nconsole.log('${commit}');\n`, { mode: 0o755 });
         fs.writeFileSync(path.join(bin, 'npm'), `#!${process.execPath}
-            const fs=require('node:fs'),path=require('node:path');
+            const fs=require('node:fs');
             const args=process.argv.slice(2);
             fs.appendFileSync(process.env.RELEASE_TEST_LOG,JSON.stringify(args)+'\\n');
-            if(args[0]==='publish' && process.env.RELEASE_TEST_FAIL==='1') {
-                console.error('npm error code E403\\nfixture-secret-must-not-appear');process.exit(1);
-            }
-            if(args[0]==='install') {
-                if(process.env.RELEASE_TEST_INSTALL_MODE==='failure') {
-                    console.error('npm error code E503\\nfixture-secret-must-not-appear');process.exit(1);
-                }
-                const installs=fs.readFileSync(process.env.RELEASE_TEST_LOG,'utf8').trim().split('\\n')
-                    .map(line=>JSON.parse(line)).filter(command=>command[0]==='install').length;
-                const mode=process.env.RELEASE_TEST_INSTALL_MODE;
-                const version=mode==='stale'||(mode==='converging'&&installs<3)?'1.1.0':mode==='unexpected'?'2.0.0':mode==='malformed'?'invalid':'${manifest.version}';
-                const folder=path.join(process.cwd(),'node_modules/@nstdata-ai/proxy-checker');fs.mkdirSync(folder,{recursive:true});
-                fs.writeFileSync(path.join(folder,'package.json'),JSON.stringify({name:'${manifest.name}',version,type:'module',exports:{'.':'./index.js','./transport':'./transport.js'}}));
-                fs.writeFileSync(path.join(process.cwd(),'package-lock.json'),JSON.stringify({packages:{'node_modules/@nstdata-ai/proxy-checker':{integrity:mode==='integrity'?'sha512-different':'${manifest.integrity}'}}}));
-                fs.writeFileSync(path.join(folder,'index.js'),'export function checkProxy(){};export function checkProxies(){};');
-                fs.writeFileSync(path.join(folder,'transport.js'),'export function createProxyTransport(){};');
-                const bin=path.join(process.cwd(),'node_modules/.bin');fs.mkdirSync(bin,{recursive:true});
-                fs.writeFileSync(path.join(bin,'nstdata-proxy-checker'),'console.log(\"Usage: nstdata-proxy-checker\");');
-                fs.appendFileSync(process.env.RELEASE_TEST_LOG+'.installs',JSON.stringify({cwd:process.cwd(),cache:args[args.indexOf('--cache')+1]})+'\\n');
+            if(args[0]!=='publish') throw new Error('Unexpected npm operation');
+            if(process.env.RELEASE_TEST_FAIL_CODE) {
+                console.error('npm error code '+process.env.RELEASE_TEST_FAIL_CODE+'\\nfixture-secret-must-not-appear');
+                process.exit(1);
             }
         `, { mode: 0o755 });
         const preload = path.join(directory, 'network.cjs');
         fs.writeFileSync(preload, `
             const fs=require('node:fs');
-            let registryReads=0;
-            require('node:timers/promises').setTimeout=async ms=>{
-                if(ms!==30000) throw new Error('Unexpected delay');
-                fs.appendFileSync(process.env.RELEASE_TEST_LOG+'.delays',ms+'\\n');
-            };
+            require('node:timers/promises').setTimeout=async()=>{throw new Error('Polling is not allowed');};
             require('node:module').syncBuiltinESMExports();
             globalThis.fetch=async url=>{
+                if(fs.existsSync(process.env.RELEASE_TEST_LOG)) throw new Error('Post-publication requests are not allowed');
+                fs.appendFileSync(process.env.RELEASE_TEST_REQUESTS,JSON.stringify(url)+'\\n');
                 let data,status=200;
                 if(url.includes('/deployment-branch-policies?')) data=${JSON.stringify(policies)};
                 else if(url==='https://api.github.com/repos/nstdata-ai/nstdata-proxy-checker/environments/npm-production') data=${JSON.stringify(environment)};
                 else if(url==='https://registry.npmjs.org/%40nstdata-ai%2Fproxy-checker/${manifest.version}') {
-                    const done=fs.existsSync(process.env.RELEASE_TEST_LOG);
-                    status=done && !(process.env.RELEASE_TEST_DELAYED==='1' && ++registryReads<3)?200:404;data=${JSON.stringify({ name: manifest.name, version: manifest.version, dist: { integrity: manifest.integrity } })};
+                    status=Number(process.env.RELEASE_TEST_REGISTRY_STATUS);data={};
                 } else throw new Error('Unexpected network request');
                 return {status,json:async()=>data};
             };
         `);
-        for (const [failure, installMode, delayed] of [[false, 'current', false], [true, 'current', false],
-            [false, 'converging', false], [false, 'stale', false], [false, 'current', true],
-            [false, 'failure', false], [false, 'unexpected', false], [false, 'malformed', false], [false, 'integrity', false]]) {
-            fs.rmSync(log, { force: true });
-            fs.rmSync(log + '.installs', { force: true });
-            fs.rmSync(log + '.delays', { force: true });
-            fs.rmSync(path.join(directory, 'summary.md'), { force: true });
+        const cases = [
+            { name: 'accepted', status: 404, publishes: 1, exit: 0 },
+            { name: 'permission failure', status: 404, code: 'E403', publishes: 1, exit: 1 },
+            { name: 'ambiguous timeout', status: 404, code: 'ETIMEDOUT', publishes: 1, exit: 1 },
+            { name: 'existing version', status: 200, publishes: 0, exit: 1 },
+            { name: 'registry failure', status: 403, publishes: 0, exit: 1 },
+            { name: 'modified archive', status: 404, tampered: true, publishes: 0, exit: 1 },
+        ];
+        for (const scenario of cases) {
+            for (const file of [log, requests, summary]) fs.rmSync(file, { force: true });
+            fs.writeFileSync(archive, scenario.tampered ? Buffer.from('modified') : bytes);
             const result = spawnSync(process.execPath, ['--require', preload, path.resolve(__dirname, '../scripts/release.mjs'), 'publish', directory], {
                 env: { ...process.env, ...env, RELEASE_VERSION: manifest.version, PATH: `${bin}${path.delimiter}${process.env.PATH}`, NODE_AUTH_TOKEN: '', NPM_TOKEN: '',
-                    RELEASE_MANIFEST_SHA256: hash(text), RELEASE_TEST_LOG: log, RELEASE_TEST_FAIL: failure ? '1' : '0',
-                    RELEASE_TEST_INSTALL_MODE: installMode, RELEASE_TEST_DELAYED: delayed ? '1' : '0', GITHUB_STEP_SUMMARY: path.join(directory, 'summary.md') },
+                    RELEASE_MANIFEST_SHA256: hash(text), RELEASE_TEST_LOG: log, RELEASE_TEST_REQUESTS: requests,
+                    RELEASE_TEST_FAIL_CODE: scenario.code ?? '', RELEASE_TEST_REGISTRY_STATUS: String(scenario.status), GITHUB_STEP_SUMMARY: summary },
                 encoding: 'utf8', timeout: 15000,
             });
-            const shouldFail = failure || ['stale', 'failure', 'unexpected', 'malformed', 'integrity'].includes(installMode);
-            assert.equal(result.status, shouldFail ? 1 : 0, `${installMode}: ${result.stderr}`);
-            assert.equal(fs.existsSync(path.join(directory, 'summary.md')), !shouldFail, 'Only a verified installation may produce the publication success summary');
-            const commands = fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-            assert.deepEqual(commands[0], ['publish', path.join(directory, manifest.filename), '--access', 'public', '--registry',
+            assert.equal(result.status, scenario.exit, `${scenario.name}: ${result.stderr}`);
+            const commands = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse) : [];
+            assert.equal(commands.length, scenario.publishes, scenario.name);
+            if (scenario.publishes) assert.deepEqual(commands[0], ['publish', archive, '--access', 'public', '--registry',
                 'https://registry.npmjs.org', '--ignore-scripts', '--provenance', '--tag', 'latest', '--fetch-retries=0']);
-            assert.equal(commands.filter(args => args[0] === 'publish').length, 1);
-            const installs = failure ? 0 : installMode === 'converging' ? 3 : installMode === 'stale' ? 7 : 1;
-            assert.equal(commands.length, 1 + installs);
-            if (!failure) assert.equal(commands[1][1], current.name, 'Verify the documented default npm install, not only a pinned version');
-            if (failure) {
-                assert.match(result.stderr, /npm publish failed \(exit 1, E403\)/);
+            assert.equal(fs.readFileSync(requests, 'utf8').trim().split('\n').length, scenario.tampered ? 2 : 3, scenario.name);
+            if (scenario.code) {
+                assert.ok(result.stderr.includes(`npm publish failed (exit 1, ${scenario.code})`));
                 assert.ok(!result.stderr.includes('fixture-secret-must-not-appear'));
+                assert.match(result.stderr, /Do not blindly rerun/);
             }
-            if (installMode === 'stale') assert.match(result.stderr, /older version after bounded checks/);
-            if (installMode === 'failure') {
-                assert.match(result.stderr, /npm install failed \(exit 1, E503\)/);
-                assert.doesNotMatch(result.stderr, /fixture-secret-must-not-appear/);
-            }
-            if (['unexpected', 'malformed'].includes(installMode)) assert.match(result.stderr, /Unexpected default installation version/);
-            if (installMode === 'integrity') assert.match(result.stderr, /Installed archive integrity differs/);
-            const delays = fs.existsSync(log + '.delays') ? fs.readFileSync(log + '.delays', 'utf8').trim().split('\n').map(Number) : [];
-            assert.deepEqual(delays, Array((delayed ? 2 : 0) + (installMode === 'converging' ? 2 : installMode === 'stale' ? 6 : 0)).fill(30000));
-            if (installs > 1) {
-                const paths = fs.readFileSync(log + '.installs', 'utf8').trim().split('\n').map(line => JSON.parse(line));
-                assert.equal(new Set(paths.map(entry => entry.cwd)).size, installs, 'Each installation must use a fresh project');
-                assert.equal(new Set(paths.map(entry => entry.cache)).size, installs, 'Each installation must use a fresh cache');
-            }
+            if (scenario.exit === 0) {
+                const message = fs.readFileSync(summary, 'utf8');
+                assert.ok(message.includes(`npm publish completed for \`${manifest.name}@${manifest.version}\``));
+                assert.match(message, /Public availability may be delayed/);
+                assert.doesNotMatch(message, /installation passed|integrity.*passed/);
+            } else assert.equal(fs.existsSync(summary), false, scenario.name);
         }
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
-
 
 test('trusted publishing refuses unavailable package metadata before the first automated release', async () => {
     await checkPackage(async (url, options) => {

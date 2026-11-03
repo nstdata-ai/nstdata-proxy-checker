@@ -2,9 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -78,32 +76,16 @@ async function checkPackage(fetchImpl) {
     assert.equal(result.data.name, name, 'Unexpected package metadata');
 }
 
-async function checkRegistry(version, integrity, fetchImpl, wait = delay) {
-    const attempts = integrity === undefined ? 1 : 7;
-    for (let attempt = 0; attempt < attempts; attempt++) {
-        const result = await request(`${registry}/${encodeURIComponent(name)}/${version}`, undefined, fetchImpl);
-        if (integrity === undefined) {
-            assert.equal(result.status, 404, 'Version already exists; do not republish');
-            return;
-        }
-        if (result.status === 404 && attempt < attempts - 1) {
-            console.log('Published version not yet visible; waiting before a read-only registry check.');
-            await wait(30000);
-            continue;
-        }
-        assert.equal(result.status, 200, 'Published version not visible after bounded checks; inspect registry before another dispatch');
-        assert.equal(result.data.name, name);
-        assert.equal(result.data.version, version);
-        assert.equal(result.data.dist?.integrity, integrity, 'Published integrity differs');
-        return;
-    }
+async function checkRegistry(version, fetchImpl = globalThis.fetch) {
+    const result = await request(`${registry}/${encodeURIComponent(name)}/${version}`, undefined, fetchImpl);
+    assert.equal(result.status, 404, 'Version already exists; do not republish');
 }
 
-function npm(args, cwd = root) {
+function npm(args) {
     const operation = `npm ${args[0]}${args[0] === 'run' ? ` ${args[1]}` : ''}`;
     console.log(`Running ${operation}`);
     try {
-        return execFileSync('npm', args, { cwd, encoding: 'utf8', timeout: 180000, stdio: ['ignore', 'pipe', 'pipe'] });
+        return execFileSync('npm', args, { cwd: root, encoding: 'utf8', timeout: 180000, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
         const code = String(error.stderr ?? '').match(/^npm error code ([A-Z][A-Z0-9_]{1,40})\s*$/m)?.[1];
         throw Object.assign(new Error(`${operation} failed (exit ${error.status ?? 'unavailable'}${code ? `, ${code}` : ''}). Inspect this stage before another dispatch.`), { code: 'RELEASE_COMMAND_FAILED' });
@@ -140,36 +122,7 @@ async function main(mode, directory, env = process.env) {
         await checkRegistry(manifest.version);
         console.log('Publishing once. If this step fails, inspect npm before another dispatch.');
         npm(['publish', archive, '--access', 'public', '--registry', registry, '--ignore-scripts', '--provenance', '--tag', 'latest', '--fetch-retries=0']);
-        await checkRegistry(manifest.version, manifest.integrity);
-        const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'nstdata-public-install-'));
-        try {
-            let installedDirectory;
-            for (let attempt = 0; attempt < 7; attempt++) {
-                const directory = path.join(temp, String(attempt));
-                fs.mkdirSync(directory);
-                fs.writeFileSync(path.join(directory, 'package.json'), '{"private":true}');
-                npm(['install', name, '--registry', registry, '--ignore-scripts', '--no-audit', '--no-fund', '--cache', path.join(directory, 'cache')], directory);
-                const installed = readJson(path.join(directory, 'node_modules', name, 'package.json'));
-                assert.equal(installed.name, name, 'Unexpected installed package');
-                if (installed.version === manifest.version) {
-                    const lock = readJson(path.join(directory, 'package-lock.json'));
-                    assert.equal(lock.packages?.[`node_modules/${name}`]?.integrity, manifest.integrity, 'Installed archive integrity differs');
-                    installedDirectory = directory;
-                    break;
-                }
-                assert.match(installed.version, /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, 'Unexpected default installation version');
-                const actual = installed.version.split('.').map(Number);
-                const expected = manifest.version.split('.').map(Number);
-                const difference = actual.findIndex((value, index) => value !== expected[index]);
-                assert.ok(difference >= 0 && actual[difference] < expected[difference], 'Unexpected default installation version');
-                assert.ok(attempt < 6, 'Default npm installation still resolves an older version after bounded checks; inspect registry before another dispatch');
-                console.log('Default npm installation still resolves an older version; waiting before a fresh installation check.');
-                await delay(30000);
-            }
-            execFileSync(process.execPath, ['--input-type=module', '-e', `import assert from 'node:assert/strict';import {checkProxy,checkProxies} from '${name}';import {createProxyTransport} from '${name}/transport';for(const fn of [checkProxy,checkProxies,createProxyTransport])assert.equal(typeof fn,'function');`], { cwd: installedDirectory, timeout: 10000 });
-            execFileSync(process.execPath, [path.join(installedDirectory, 'node_modules/.bin/nstdata-proxy-checker'), '--help'], { cwd: installedDirectory, timeout: 10000 });
-        } finally { fs.rmSync(temp, { recursive: true, force: true }); }
-        fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `\nPublished \`${name}@${manifest.version}\`; registry integrity and clean public installation passed.\n`);
+        fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `\nnpm publish completed for \`${name}@${manifest.version}\`. Public availability may be delayed.\n`);
     }
 }
 
