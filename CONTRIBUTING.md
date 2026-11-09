@@ -26,7 +26,7 @@ npm pack
 ```
 
 ```sh
-npm install /path/to/nstdata-proxy-checker/nstdata-ai-proxy-checker-1.2.0.tgz
+npm install /path/to/nstdata-proxy-checker/nstdata-ai-proxy-checker-1.2.1.tgz
 ```
 
 For CLI information lookup, install a locally built `@nstdata-ai/ip-lookup` archive in that same application. The checker does not fetch or install this optional package at runtime.

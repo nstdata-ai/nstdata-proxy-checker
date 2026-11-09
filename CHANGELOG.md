@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.1
 
 - Preserve HTTP and application error codes from Nstdata setup failures, with actionable CLI hints.
 

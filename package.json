@@ -1,6 +1,6 @@
 {
   "name": "@nstdata-ai/proxy-checker",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Bounded HTTP/HTTPS proxy checks and reusable Node.js gateway transport",
   "type": "module",
   "exports": {
