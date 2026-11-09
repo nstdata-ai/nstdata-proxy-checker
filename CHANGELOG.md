@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Preserve HTTP and application error codes from Nstdata setup failures, with actionable CLI hints.
+
 ## 1.2.0
 
 - Add explicit Nstdata CLI mode: obtain one HTTP proxy using an API key and available balance, then check one target.

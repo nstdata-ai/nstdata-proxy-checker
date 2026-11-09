@@ -148,14 +148,57 @@ test('Nstdata CLI loads only an explicit env file and allows JSON/CSV target fai
 });
 
 test('setup failure or an uncertain creation never continues to generation or a target probe', async t => {
-    for (const mode of ['balance', 'unknown']) {
+    for (const mode of ['balance', 'unknown', 'unavailable']) {
         const { state, env } = await nstdataFixture(t, { balance: mode === 'balance' ? 0 : 20,
-            handle(req, _res, url) { if (mode === 'unknown' && url.pathname.endsWith('/channel')) { req.socket.destroy(); return true; } } });
+            handle(req, res, url) {
+                if (!url.pathname.endsWith('/channel')) return;
+                if (mode === 'unknown') { req.socket.destroy(); return true; }
+                if (mode === 'unavailable') { res.writeHead(503); res.end(apiKey); return true; }
+            } });
         const result = await cli(['--nstdata', '--yes', ...target], env);
         assert.equal(result.code, 1, result.stderr);
         assert.equal(JSON.parse(result.stderr).error.code, mode === 'balance' ? 'INSUFFICIENT_BALANCE' : 'CHANNEL_CREATION_UNCERTAIN');
+        if (mode === 'unavailable') {
+            const error = JSON.parse(result.stderr).error;
+            assert.equal(error.statusCode, 503);
+            assert.equal(error.hint, undefined);
+            assert.match(error.message, /Check existing channels/);
+        }
         assert.equal(state.requests.filter(row => row.method === 'POST').length, mode === 'balance' ? 0 : 1);
         assert.equal(state.requests.filter(row => row.path.endsWith('/proxies')).length, 0);
+        assert.equal(state.probes.length, 0);
+    }
+});
+
+test('Nstdata CLI preserves safe API diagnostics without generation, traffic or retry', async t => {
+    for (const scenario of [
+        { status: 401, hint: /NSTDATA_API_TOKEN/ },
+        { status: 403, hint: /permissions/ },
+        { status: 429, hint: /rate limit/ },
+        { status: 503, hint: /service/ },
+        { status: 200, applicationCode: 403, expectedApplicationCode: 403, hint: /permissions/ },
+        { status: 201, applicationCode: 403, expectedApplicationCode: 403, hint: /permissions/ },
+        { status: 200, applicationCode: 10001, expectedApplicationCode: 10001 },
+        { status: 200, applicationCode: 1.5 },
+    ]) {
+        const { state, env } = await nstdataFixture(t, { handle(_req, res) {
+            res.writeHead(scenario.status, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ err: true, code: scenario.applicationCode ?? 403,
+                message: `${apiKey} http://fixture-user:fixture-password@gateway.invalid/`, data: {} }));
+            return true;
+        } });
+        const result = await cli(['--nstdata', '--yes', ...target], env);
+        assert.equal(result.code, 1, result.stderr);
+        assert.equal(result.stdout, '');
+        const error = JSON.parse(result.stderr).error;
+        assert.equal(error.code, scenario.status < 300 ? 'API_ERROR' : 'HTTP_ERROR');
+        assert.equal(error.statusCode, scenario.status);
+        assert.equal(error.applicationCode, scenario.expectedApplicationCode);
+        if (scenario.hint) assert.match(error.hint, scenario.hint);
+        else assert.equal(error.hint, undefined);
+        assert.doesNotMatch(result.stderr, /checker-synthetic-api-key|fixture-user|fixture-password|gateway\.invalid/);
+        assert.equal(state.requests.length, 1);
+        assert.ok(state.requests.every(row => row.method === 'GET' && row.path.endsWith('/user/info')));
         assert.equal(state.probes.length, 0);
     }
 });
