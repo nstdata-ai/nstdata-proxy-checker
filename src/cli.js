@@ -17,6 +17,20 @@ function validateInput(check, message) {
     catch { throw new CliInputError('INVALID_CONFIG', message); }
 }
 
+function apiDiagnostics(error) {
+    const details = {};
+    if (Number.isInteger(error.statusCode) && error.statusCode >= 100 && error.statusCode <= 599)
+        details.statusCode = error.statusCode;
+    if (Number.isSafeInteger(error.applicationCode)) details.applicationCode = error.applicationCode;
+    if (error.code !== 'HTTP_ERROR' && error.code !== 'API_ERROR') return details;
+    const status = error.code === 'API_ERROR' ? details.applicationCode : details.statusCode;
+    if (status === 401) details.hint = 'Check NSTDATA_API_TOKEN and its account or team context.';
+    else if (status === 403) details.hint = 'Check the API key permissions and account or team access.';
+    else if (status === 429) details.hint = 'The API rate limit was reached. Wait before starting another command.';
+    else if (status >= 500 && status <= 599) details.hint = 'The API returned a service error. Check its status before another command.';
+    return details;
+}
+
 async function nstdataProxy(values, timeoutMs, signal) {
     const interactive = Boolean(process.stdin.isTTY && process.stderr.isTTY && !values.yes);
     let apiKey = process.env.NSTDATA_API_TOKEN;
@@ -64,7 +78,8 @@ async function nstdataProxy(values, timeoutMs, signal) {
     } catch (error) {
         if (error instanceof CliInputError) throw error;
         if (signal.aborted) throw new CliInputError('ABORTED', 'Local waiting stopped; submitted operations may still complete. Do not blindly repeat setup.', 130);
-        if (error instanceof ProxyAPIError) throw new CliInputError(error.code, error.message, error.code === 'ABORTED' ? 130 : 1);
+        if (error instanceof ProxyAPIError) throw Object.assign(
+            new CliInputError(error.code, error.message, error.code === 'ABORTED' ? 130 : 1), apiDiagnostics(error));
         throw new CliInputError('SETUP_FAILED', 'Nstdata setup failed; no automatic retry was made.', 1);
     }
 }
@@ -220,6 +235,6 @@ try {
     const code = error instanceof ProxyCheckError ? error.code : 'INVALID_INPUT';
     const message = error instanceof CliInputError ? error.message
         : 'Invalid command-line arguments or input. Run nstdata-proxy-checker --help for usage.';
-    console.error(JSON.stringify({ error: { code, message } }));
+    console.error(JSON.stringify({ error: { code, message, ...(error instanceof CliInputError ? apiDiagnostics(error) : {}) } }));
     process.exitCode = error instanceof CliInputError ? error.exitCode : 2;
 }

@@ -33,6 +33,8 @@ The `.env` file contains `NSTDATA_API_TOKEN`, as shown in the [quick start](../R
 
 A failed setup stops before the target check. Creation/generation is never retried automatically. `CHANNEL_CREATION_UNCERTAIN` or `PROXY_GENERATION_UNCERTAIN` means the remote operation may have completed: inspect the account before another run. Cancelling local waiting does not undo remote operations. Reuse `--channel` when strict sharing across machines is required; concurrent first runs on separate machines can create separate default channels.
 
+Setup failures go to stderr as an `error` object containing `code`, `message` and any known `statusCode` or integer `applicationCode`. Common authentication, permission, rate-limit and service errors include a short `hint`.
+
 HTTP status and `elapsedMs` still describe the target request, excluding account setup. JSON/CSV results never include the API key, generated connection or channel ID. Optional IP probes/lookups retain their separate semantics. Account setup can use multiple bounded API requests; `--timeout` applies to each API or proxy request, not the whole command.
 
 ## CLI and batches

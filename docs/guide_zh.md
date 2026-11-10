@@ -33,6 +33,8 @@ npx --no-install nstdata-proxy-checker --nstdata --env .env --yes
 
 配置或出号失败时停止，不进入目标检测。创建和出号不自动重试。`CHANNEL_CREATION_UNCERTAIN` 或 `PROXY_GENERATION_UNCERTAIN` 表示远端可能已执行，先在账号中核对结果再决定后续操作。取消本地等待不会撤销远端操作。多机器需要严格共用渠道时使用 `--channel`；多个进程同时首次使用可能各自创建默认渠道。
 
+初始化错误以 `error` 对象写入 stderr，包含 `code`、`message` 和已知的 `statusCode`／整数 `applicationCode`；常见认证、权限、限流及服务错误另有简短的 `hint`。
+
 HTTP 状态和 `elapsedMs` 仍仅描述目标请求，不含账号初始化。JSON／CSV 不包含 Key、生成的连接或渠道 ID。可选 IP 探测／查询的含义不变。账号初始化可能执行多次有界 API 请求；`--timeout` 限制每次 API 或代理请求，不是整个命令的总期限。
 
 ## 命令行与批量检查
