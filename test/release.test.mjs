@@ -18,6 +18,17 @@ const environment = { can_admins_bypass: false,
     deployment_branch_policy: { custom_branch_policies: true, protected_branches: false } };
 const policies = { total_count: 1, branch_policies: [{ name: 'main', type: 'branch' }] };
 
+test('publish reruns download the artifact from the successful package job', () => {
+    const workflow = fs.readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+    const [packageJob, publishJob] = workflow.slice(workflow.indexOf('\n  package:\n')).split('\n  publish:\n');
+    assert.match(packageJob, /artifact-id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
+    assert.match(packageJob, /- id: upload\n        uses: actions\/upload-artifact@/);
+    const download = publishJob.match(/uses: actions\/download-artifact@[^\n]+\n        with:\n((?: {10}[^\n]+\n)+)/)?.[1];
+    assert.ok(download, 'Download step must exist');
+    assert.match(download, /artifact-ids: \$\{\{ needs\.package\.outputs\.artifact-id \}\}/);
+    assert.doesNotMatch(download, /(?:^|\n) {10}name:/);
+});
+
 test('release identity requires a manually dispatched reviewed main commit and stable matching version', () => {
     validateSource(env, pkg);
     for (const [key, value] of Object.entries({ GITHUB_EVENT_NAME: 'push', GITHUB_REPOSITORY: 'other/nstdata-proxy-checker', GITHUB_REF: 'refs/heads/feature',
